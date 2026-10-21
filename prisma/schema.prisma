@@ -1,0 +1,1402 @@
+// MIL Digital — Hybrid Work & Attendance Management
+// All calendar dates are stored as PostgreSQL DATE (no time component) and interpreted in Asia/Jakarta.
+// Timestamps (createdAt, clockInAt, ...) are stored in UTC.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  /// Direct (non-pooled) connection for migrations; same as DATABASE_URL locally.
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  EMPLOYEE
+  LEADER
+  HR
+  SUPER_ADMIN
+}
+
+enum EmploymentStatus {
+  PERMANENT
+  CONTRACT
+  PROBATION
+  INTERN
+}
+
+enum RelationshipType {
+  PRIMARY
+  SECONDARY
+}
+
+enum EvaluationPeriod {
+  MONTHLY
+  QUARTERLY
+}
+
+enum RoundingMode {
+  CEIL
+  ROUND
+  FLOOR
+}
+
+enum HolidayType {
+  NATIONAL
+  CUTI_BERSAMA
+  COMPANY
+}
+
+enum WorkMode {
+  WFO
+  WFH
+  OFFSITE
+}
+
+enum ScheduleStatus {
+  DRAFT
+  SUBMITTED
+  PENDING_LEADER_APPROVAL
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+  REVISION_PENDING
+  SUPERSEDED
+}
+
+enum RevisionKind {
+  WFO_TO_WFH
+  WFH_TO_WFO
+  SWAP
+  ADDITIONAL_WFH
+}
+
+enum RevisionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  CANCELLED
+}
+
+enum RequestCategory {
+  LEAVE
+  PERMISSION
+  OFFSITE
+  ADDITIONAL_WFH
+  SCHEDULE_CHANGE
+}
+
+enum RequestStatus {
+  DRAFT
+  PENDING_DELEGATE
+  PENDING_LEADER
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  CANCELLED
+}
+
+enum DurationType {
+  FULL_DAY
+  HALF_DAY_AM
+  HALF_DAY_PM
+  HOURLY
+}
+
+enum Requirement {
+  NONE
+  OPTIONAL
+  REQUIRED
+}
+
+enum DelegationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CLARIFICATION_REQUESTED
+  CANCELLED
+}
+
+enum WorkflowSubject {
+  SCHEDULE
+  REVISION
+  REQUEST
+  EVENT_EXCEPTION
+}
+
+enum WorkflowStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  CANCELLED
+}
+
+enum StepKind {
+  DELEGATE
+  LEADER
+  HR
+}
+
+enum StepStatus {
+  WAITING
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  CLARIFICATION_REQUESTED
+  SKIPPED
+  CANCELLED
+}
+
+enum AttendanceSource {
+  SELF_CLOCK_IN
+  HR_CORRECTION
+  PROVIDER
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+}
+
+enum ExceptionKind {
+  MANDATORY_DAY_WAIVER
+  WFO_REDUCTION
+}
+
+// ───────────────────────────── Identity ─────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(EMPLOYEE)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee      Employee?
+  sessions      Session[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+  files         StoredFile[]
+  grants        PermissionGrant[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ───────────────────────────── Organisation ─────────────────────────────
+
+model Department {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teams     Team[]
+  employees Employee[]
+}
+
+model Team {
+  id               String     @id @default(cuid())
+  name             String
+  departmentId     String
+  department       Department @relation(fields: [departmentId], references: [id])
+  leadId           String?
+  lead             Employee?  @relation("TeamLead", fields: [leadId], references: [id])
+  backupApproverId String?
+  backupApprover   Employee?  @relation("TeamBackupApprover", fields: [backupApproverId], references: [id])
+  isActive         Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  memberships    EmployeeTeamMembership[]
+  calendarGrants InternalCalendarPermission[]
+  announcements  AnnouncementAudience[]
+
+  @@unique([departmentId, name])
+}
+
+model Employee {
+  id               String           @id @default(cuid())
+  employeeCode     String           @unique
+  userId           String?          @unique
+  user             User?            @relation(fields: [userId], references: [id])
+  fullName         String
+  email            String           @unique
+  employmentStatus EmploymentStatus @default(PERMANENT)
+  jobTitle         String
+  departmentId     String?
+  department       Department?      @relation(fields: [departmentId], references: [id])
+  startDate        DateTime         @db.Date
+  isActive         Boolean          @default(true)
+  deactivatedAt    DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  memberships         EmployeeTeamMembership[]
+  levelAssignments    EmployeeLevelAssignment[]
+  policyAssignments   EmployeePolicyAssignment[]
+  reportsTo           ReportingRelationship[]          @relation("ReportEmployee")
+  directReports       ReportingRelationship[]          @relation("ReportLeader")
+  teamsLed            Team[]                           @relation("TeamLead")
+  teamsBackup         Team[]                           @relation("TeamBackupApprover")
+  schedules           MonthlySchedule[]
+  revisions           ScheduleRevision[]
+  requests            Request[]
+  delegationsGiven    DelegationAssignment[]           @relation("Delegator")
+  delegationsTaken    DelegationAssignment[]           @relation("Delegate")
+  attendance          AttendanceRecord[]
+  leaveBalances       LeaveBalance[]
+  exceptions          AttendanceException[]
+  workflowsRequested  ApprovalWorkflow[]               @relation("WorkflowRequester")
+  stepsAssigned       ApprovalStep[]                   @relation("StepAssignee")
+  stepsOriginal       ApprovalStep[]                   @relation("StepOriginalAssignee")
+  stepsDecided        ApprovalStep[]                   @relation("StepDecider")
+  approvalActions     ApprovalAction[]
+  eventsOrganized     InternalEvent[]                  @relation("EventOrganizer")
+  eventsCreated       InternalEvent[]                  @relation("EventCreatedBy")
+  eventsUpdated       InternalEvent[]                  @relation("EventUpdatedBy")
+  eventParticipation  InternalEventParticipant[]
+  calendarGrants      InternalCalendarPermission[]     @relation("CalendarGrantEmployee")
+  calendarGrantsMade  InternalCalendarPermission[]     @relation("CalendarGrantAssigner")
+  eventAuditEntries   InternalEventAuditLog[]
+  eventExceptions     InternalEventConflictException[]
+  personalData        EmployeePersonalData?
+  photoId             String?                          @unique
+  photo               StoredFile?                      @relation("EmployeePhoto", fields: [photoId], references: [id])
+  roleDescription     String?
+  regulationsOwned    CompanyRegulation[]              @relation("RegulationOwner")
+  acknowledgements    RegulationAcknowledgement[]
+  announcements       Announcement[]                   @relation("AnnouncementAuthor")
+  announcementTarget  AnnouncementAudience[]           @relation("AnnouncementTarget")
+  recognitions        EmployeeRecognition[]            @relation("RecognitionSubject")
+  recognitionsGiven   EmployeeRecognition[]            @relation("RecognitionAuthor")
+  clientAssignments   ClientTeamAssignment[]           @relation("ClientAssignments")
+  clientStatusChanges ClientStatusHistory[]            @relation("ClientStatusChangedBy")
+
+  @@index([isActive])
+  @@index([departmentId])
+}
+
+model EmployeeTeamMembership {
+  id            String    @id @default(cuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id])
+  teamId        String
+  team          Team      @relation(fields: [teamId], references: [id])
+  isPrimary     Boolean   @default(true)
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([teamId, effectiveFrom])
+  @@index([employeeId, effectiveFrom])
+}
+
+/// Level groups (Junior & Associate, Senior, Principal IC, Manager & Leader).
+/// A level is NOT a permission role: approval rights come from User.role + ReportingRelationship.
+model EmployeeLevel {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String   @unique
+  rank        Int
+  description String?
+  policyId    String
+  policy      Policy   @relation(fields: [policyId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assignments   EmployeeLevelAssignment[]
+  announcements AnnouncementAudience[]
+}
+
+model EmployeeLevelAssignment {
+  id            String        @id @default(cuid())
+  employeeId    String
+  employee      Employee      @relation(fields: [employeeId], references: [id])
+  levelId       String
+  level         EmployeeLevel @relation(fields: [levelId], references: [id])
+  effectiveFrom DateTime      @db.Date
+  effectiveTo   DateTime?     @db.Date
+  reason        String?
+  changedById   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([employeeId, effectiveFrom])
+}
+
+model ReportingRelationship {
+  id            String           @id @default(cuid())
+  employeeId    String
+  employee      Employee         @relation("ReportEmployee", fields: [employeeId], references: [id])
+  leaderId      String
+  leader        Employee         @relation("ReportLeader", fields: [leaderId], references: [id])
+  type          RelationshipType @default(PRIMARY)
+  effectiveFrom DateTime         @db.Date
+  effectiveTo   DateTime?        @db.Date
+  createdById   String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([employeeId, type, effectiveFrom])
+  @@index([leaderId, effectiveFrom])
+}
+
+// ───────────────────────────── Policies ─────────────────────────────
+
+model Policy {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  versions    PolicyVersion[]
+  levels      EmployeeLevel[]
+  assignments EmployeePolicyAssignment[]
+}
+
+/// Immutable once used: edits create a new version with a new effective date.
+model PolicyVersion {
+  id                          String           @id @default(cuid())
+  policyId                    String
+  policy                      Policy           @relation(fields: [policyId], references: [id])
+  version                     Int
+  wfoPercent                  Int
+  mandatoryWeekdays           Int[]
+  flexibleWeekdays            Int[]
+  evaluationPeriod            EvaluationPeriod @default(MONTHLY)
+  submissionDeadlineDay       Int              @default(25)
+  requiresLeaderApproval      Boolean          @default(true)
+  wfhCarryOver                Boolean          @default(false)
+  exceptionsRequireHr         Boolean          @default(false)
+  roundingMode                RoundingMode     @default(CEIL)
+  excludeLeaveFromDenominator Boolean          @default(true)
+  offsiteCountsAsWfo          Boolean          @default(true)
+  effectiveFrom               DateTime         @db.Date
+  effectiveTo                 DateTime?        @db.Date
+  changeNote                  String?
+  createdById                 String?
+  createdAt                   DateTime         @default(now())
+
+  schedules MonthlySchedule[]
+
+  @@unique([policyId, version])
+  @@index([policyId, effectiveFrom])
+}
+
+model EmployeePolicyAssignment {
+  id            String    @id @default(cuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id])
+  policyId      String
+  policy        Policy    @relation(fields: [policyId], references: [id])
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  reason        String
+  assignedById  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([employeeId, effectiveFrom])
+}
+
+// ───────────────────────────── Holidays ─────────────────────────────
+
+model HolidayCalendar {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  isDefault Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  holidays  Holiday[]
+}
+
+model Holiday {
+  id         String          @id @default(cuid())
+  calendarId String
+  calendar   HolidayCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  date       DateTime        @db.Date
+  name       String
+  type       HolidayType
+  /// Manual override: false = company works on this day despite the listing
+  isObserved Boolean         @default(true)
+  source     String?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@unique([calendarId, date, name])
+  @@index([calendarId, date])
+}
+
+// ───────────────────────────── Schedules ─────────────────────────────
+
+model MonthlySchedule {
+  id              String         @id @default(cuid())
+  employeeId      String
+  employee        Employee       @relation(fields: [employeeId], references: [id])
+  year            Int
+  month           Int
+  status          ScheduleStatus @default(DRAFT)
+  /// Policy snapshot: once submitted, the month is evaluated with this version.
+  policyVersionId String?
+  policyVersion   PolicyVersion? @relation(fields: [policyVersionId], references: [id])
+  currentVersion  Int            @default(0)
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  approvedById    String?
+  lastComment     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  days      ScheduleDay[]
+  versions  ScheduleVersion[]
+  revisions ScheduleRevision[]
+
+  @@unique([employeeId, year, month])
+  @@index([year, month, status])
+}
+
+/// plannedMode = editable draft; approvedMode = official approved plan.
+model ScheduleDay {
+  id           String          @id @default(cuid())
+  scheduleId   String
+  schedule     MonthlySchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  date         DateTime        @db.Date
+  plannedMode  WorkMode?
+  approvedMode WorkMode?
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([scheduleId, date])
+}
+
+/// Immutable snapshot written on every submission / approval / applied revision.
+model ScheduleVersion {
+  id              String          @id @default(cuid())
+  scheduleId      String
+  schedule        MonthlySchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  version         Int
+  kind            String
+  days            Json
+  policyVersionId String?
+  actorId         String?
+  note            String?
+  createdAt       DateTime        @default(now())
+
+  @@unique([scheduleId, version])
+}
+
+model ScheduleRevision {
+  id                String          @id @default(cuid())
+  scheduleId        String
+  schedule          MonthlySchedule @relation(fields: [scheduleId], references: [id])
+  employeeId        String
+  employee          Employee        @relation(fields: [employeeId], references: [id])
+  kind              RevisionKind
+  reason            String
+  status            RevisionStatus  @default(PENDING)
+  requiresException Boolean         @default(false)
+  impact            Json
+  idempotencyKey    String
+  decidedAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  items ScheduleRevisionItem[]
+
+  @@unique([employeeId, idempotencyKey])
+  @@index([scheduleId, status])
+}
+
+model ScheduleRevisionItem {
+  id            String           @id @default(cuid())
+  revisionId    String
+  revision      ScheduleRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  date          DateTime         @db.Date
+  fromMode      WorkMode?
+  toMode        WorkMode
+  isReplacement Boolean          @default(false)
+}
+
+// ───────────────────────────── Attendance ─────────────────────────────
+
+model AttendanceRecord {
+  id           String             @id @default(cuid())
+  employeeId   String
+  employee     Employee           @relation(fields: [employeeId], references: [id])
+  date         DateTime           @db.Date
+  mode         WorkMode
+  clockInAt    DateTime?
+  source       AttendanceSource   @default(SELF_CLOCK_IN)
+  verification VerificationStatus @default(UNVERIFIED)
+  verifiedById String?
+  verifiedAt   DateTime?
+  note         String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  corrections AttendanceCorrection[]
+
+  @@unique([employeeId, date])
+  @@index([date])
+}
+
+model AttendanceCorrection {
+  id            String           @id @default(cuid())
+  recordId      String
+  record        AttendanceRecord @relation(fields: [recordId], references: [id])
+  before        Json?
+  after         Json
+  reason        String
+  correctedById String
+  createdAt     DateTime         @default(now())
+}
+
+/// Authorised exceptions (e.g. approved WFO shortfall, waived mandatory day).
+model AttendanceException {
+  id           String        @id @default(cuid())
+  employeeId   String
+  employee     Employee      @relation(fields: [employeeId], references: [id])
+  year         Int
+  month        Int
+  date         DateTime?     @db.Date
+  kind         ExceptionKind
+  days         Int           @default(1)
+  reason       String
+  approvedById String
+  sourceType   String?
+  sourceId     String?
+  createdAt    DateTime      @default(now())
+
+  @@index([employeeId, year, month])
+}
+
+// ───────────────────────────── Requests ─────────────────────────────
+
+/// Configurable request categories (LeaveTypes): annual, sick, permission, offsite, additional WFH, ...
+model RequestType {
+  id                  String          @id @default(cuid())
+  code                String          @unique
+  name                String
+  category            RequestCategory
+  description         String?
+  documentRequirement Requirement     @default(NONE)
+  delegation          Requirement     @default(OPTIONAL)
+  reasonMinLength     Int             @default(10)
+  advanceNoticeDays   Int             @default(0)
+  allowHalfDay        Boolean         @default(true)
+  allowHourly         Boolean         @default(false)
+  deductsBalance      Boolean         @default(false)
+  defaultEntitlement  Float?
+  isSensitive         Boolean         @default(false)
+  isActive            Boolean         @default(true)
+  sortOrder           Int             @default(0)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  requests Request[]
+  balances LeaveBalance[]
+}
+
+model LeaveBalance {
+  id            String      @id @default(cuid())
+  employeeId    String
+  employee      Employee    @relation(fields: [employeeId], references: [id])
+  requestTypeId String
+  requestType   RequestType @relation(fields: [requestTypeId], references: [id])
+  year          Int
+  entitledDays  Float
+  adjustedDays  Float       @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([employeeId, requestTypeId, year])
+}
+
+/// Leave & permission requests (LeaveRequests + PermissionRequests, discriminated by RequestType.category).
+model Request {
+  id             String        @id @default(cuid())
+  employeeId     String
+  employee       Employee      @relation(fields: [employeeId], references: [id])
+  requestTypeId  String
+  requestType    RequestType   @relation(fields: [requestTypeId], references: [id])
+  status         RequestStatus @default(DRAFT)
+  startDate      DateTime      @db.Date
+  endDate        DateTime      @db.Date
+  durationType   DurationType  @default(FULL_DAY)
+  startTime      String?
+  endTime        String?
+  reason         String
+  workingDays    Float         @default(0)
+  documentId     String?       @unique
+  document       StoredFile?   @relation("RequestDocument", fields: [documentId], references: [id])
+  impact         Json?
+  /// For ADDITIONAL_WFH requests: the linked schedule revision.
+  revisionId     String?       @unique
+  idempotencyKey String
+  submittedAt    DateTime?
+  decidedAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  /// One or more peer delegates; all must accept before the leader step.
+  delegations DelegationAssignment[]
+
+  @@unique([employeeId, idempotencyKey])
+  @@index([employeeId, startDate, endDate])
+  @@index([status])
+}
+
+model DelegationAssignment {
+  id              String           @id @default(cuid())
+  requestId       String
+  request         Request          @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  delegatorId     String
+  delegator       Employee         @relation("Delegator", fields: [delegatorId], references: [id])
+  delegateId      String
+  delegate        Employee         @relation("Delegate", fields: [delegateId], references: [id])
+  handoverNotes   String
+  tasks           Json
+  coverageStart   DateTime         @db.Date
+  coverageEnd     DateTime         @db.Date
+  attachmentId    String?          @unique
+  attachment      StoredFile?      @relation("DelegationAttachment", fields: [attachmentId], references: [id])
+  status          DelegationStatus @default(PENDING)
+  responseComment String?
+  respondedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([requestId, delegateId])
+  @@index([requestId])
+  @@index([delegateId, status])
+}
+
+model StoredFile {
+  id           String   @id @default(cuid())
+  ownerId      String
+  owner        User     @relation(fields: [ownerId], references: [id])
+  originalName String
+  mimeType     String
+  size         Int
+  storageKey   String   @unique
+  sha256       String
+  isSensitive  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  request            Request?              @relation("RequestDocument")
+  delegation         DelegationAssignment? @relation("DelegationAttachment")
+  employeePhoto      Employee?             @relation("EmployeePhoto")
+  regulationVersions RegulationVersion[]   @relation("RegulationAttachment")
+  announcements      Announcement[]        @relation("AnnouncementAttachment")
+}
+
+// ───────────────────────────── Approvals ─────────────────────────────
+
+model ApprovalWorkflow {
+  id               String          @id @default(cuid())
+  subjectType      WorkflowSubject
+  subjectId        String
+  requesterId      String
+  requester        Employee        @relation("WorkflowRequester", fields: [requesterId], references: [id])
+  status           WorkflowStatus  @default(PENDING)
+  currentStepOrder Int             @default(1)
+  createdAt        DateTime        @default(now())
+  completedAt      DateTime?
+  updatedAt        DateTime        @updatedAt
+
+  steps   ApprovalStep[]
+  actions ApprovalAction[]
+
+  // A partial unique index (one PENDING workflow per subject) is added in the SQL migration.
+  @@index([subjectType, subjectId])
+}
+
+model ApprovalStep {
+  id                 String           @id @default(cuid())
+  workflowId         String
+  workflow           ApprovalWorkflow @relation(fields: [workflowId], references: [id])
+  order              Int
+  kind               StepKind
+  assigneeId         String
+  assignee           Employee         @relation("StepAssignee", fields: [assigneeId], references: [id])
+  originalAssigneeId String
+  originalAssignee   Employee         @relation("StepOriginalAssignee", fields: [originalAssigneeId], references: [id])
+  status             StepStatus       @default(WAITING)
+  dueAt              DateTime?
+  activatedAt        DateTime?
+  decidedAt          DateTime?
+  decidedById        String?
+  decidedBy          Employee?        @relation("StepDecider", fields: [decidedById], references: [id])
+  comment            String?
+  escalated          Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  actions ApprovalAction[]
+
+  @@unique([workflowId, order])
+  @@index([assigneeId, status])
+}
+
+/// Append-only (UPDATE/DELETE blocked by a database trigger).
+model ApprovalAction {
+  id         String           @id @default(cuid())
+  workflowId String
+  workflow   ApprovalWorkflow @relation(fields: [workflowId], references: [id])
+  stepId     String?
+  step       ApprovalStep?    @relation(fields: [stepId], references: [id])
+  actorId    String?
+  actor      Employee?        @relation(fields: [actorId], references: [id])
+  action     String
+  comment    String?
+  metadata   Json?
+  createdAt  DateTime         @default(now())
+
+  @@index([workflowId, createdAt])
+}
+
+// ───────────────────────────── Notifications & audit ─────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  link      String?
+  dedupeKey String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+}
+
+/// Append-only (UPDATE/DELETE blocked by a database trigger).
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  actor       User?    @relation(fields: [actorUserId], references: [id])
+  action      String
+  entityType  String
+  entityId    String
+  before      Json?
+  after       Json?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  key         String   @id
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+/// Private file contents when STORAGE_DRIVER=db (serverless hosts such as Vercel have no persistent disk).
+model FileBlob {
+  storageKey String   @id
+  data       Bytes
+  createdAt  DateTime @default(now())
+}
+
+// ───────────────────────────── Internal Calendar ─────────────────────────────
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+enum EventLocationType {
+  IN_OFFICE
+  ONLINE
+  HYBRID
+  EXTERNAL
+}
+
+enum EventAttendance {
+  MANDATORY
+  OPTIONAL
+}
+
+enum EventWfoRequirement {
+  IN_OFFICE_REQUIRED
+  REMOTE_ALLOWED
+  NONE
+}
+
+enum EventAssignmentType {
+  ALL
+  DEPARTMENT
+  TEAM
+  LEVEL
+  EMPLOYEE
+}
+
+enum EventParticipantStatus {
+  INVITED
+  ATTENDED
+  ABSENT
+  EXCUSED
+}
+
+enum RecurrenceFreq {
+  DAILY
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum CalendarRole {
+  VIEWER
+  ORGANIZER
+  EDITOR
+  MANAGER
+}
+
+enum CalendarScope {
+  ALL
+  DEPARTMENT
+  TEAM
+}
+
+model InternalEventCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events InternalEvent[]
+}
+
+/// Recurrence definition. Occurrences are materialised as InternalEvent rows (seriesId) so single
+/// occurrences can be edited or cancelled as exceptions.
+model InternalEventSeries {
+  id         String         @id @default(cuid())
+  freq       RecurrenceFreq
+  interval   Int            @default(1)
+  byWeekdays Int[]
+  untilDate  DateTime       @db.Date
+  rule       String
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  events InternalEvent[]
+}
+
+model InternalEvent {
+  id                    String                @id @default(cuid())
+  seriesId              String?
+  series                InternalEventSeries?  @relation(fields: [seriesId], references: [id])
+  /// true when this occurrence was edited individually and no longer follows series edits
+  isException           Boolean               @default(false)
+  title                 String
+  categoryId            String
+  category              InternalEventCategory @relation(fields: [categoryId], references: [id])
+  topic                 String
+  description           String?
+  startAt               DateTime
+  endAt                 DateTime
+  /// Jakarta calendar dates covered by the event (for day-level joins with work schedules)
+  localDate             DateTime              @db.Date
+  localEndDate          DateTime              @db.Date
+  timezone              String                @default("Asia/Jakarta")
+  locationType          EventLocationType
+  locationDetail        String?
+  meetingUrl            String?
+  organizerId           String
+  organizer             Employee              @relation("EventOrganizer", fields: [organizerId], references: [id])
+  attendanceRequirement EventAttendance
+  wfoRequirement        EventWfoRequirement
+  reminderMinutes       Int[]
+  /// false (default): occurrences on holidays / non-working days are skipped, rejected or auto-cancelled
+  allowOnOffDays        Boolean               @default(false)
+  status                EventStatus           @default(DRAFT)
+  cancelReason          String?
+  publishedAt           DateTime?
+  cancelledAt           DateTime?
+  createdById           String
+  createdBy             Employee              @relation("EventCreatedBy", fields: [createdById], references: [id])
+  updatedById           String?
+  updatedBy             Employee?             @relation("EventUpdatedBy", fields: [updatedById], references: [id])
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  rules        InternalEventAssignmentRule[]
+  participants InternalEventParticipant[]
+  auditLogs    InternalEventAuditLog[]
+  exceptions   InternalEventConflictException[]
+
+  @@index([localDate, status])
+  @@index([seriesId, startAt])
+  @@index([organizerId])
+}
+
+model InternalEventAssignmentRule {
+  id                String              @id @default(cuid())
+  eventId           String
+  event             InternalEvent       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  assignmentType    EventAssignmentType
+  /// department / team / level / employee id; null for ALL
+  targetId          String?
+  dynamicMembership Boolean             @default(false)
+
+  @@index([eventId])
+}
+
+model InternalEventParticipant {
+  id               String                 @id @default(cuid())
+  eventId          String
+  event            InternalEvent          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  employeeId       String
+  employee         Employee               @relation(fields: [employeeId], references: [id])
+  assignmentSource EventAssignmentType
+  attendanceStatus EventParticipantStatus @default(INVITED)
+  createdAt        DateTime               @default(now())
+
+  @@unique([eventId, employeeId])
+  @@index([employeeId])
+}
+
+/// Calendar permission grant to exactly one of: an employee, a team, or an application role.
+model InternalCalendarPermission {
+  id             String        @id @default(cuid())
+  employeeId     String?
+  employee       Employee?     @relation("CalendarGrantEmployee", fields: [employeeId], references: [id])
+  teamId         String?
+  team           Team?         @relation(fields: [teamId], references: [id])
+  appRole        Role?
+  permissionRole CalendarRole
+  scope          CalendarScope @default(ALL)
+  /// department or team id when scope is DEPARTMENT / TEAM
+  scopeId        String?
+  assignedById   String
+  assignedBy     Employee      @relation("CalendarGrantAssigner", fields: [assignedById], references: [id])
+  createdAt      DateTime      @default(now())
+
+  @@index([employeeId])
+  @@index([teamId])
+}
+
+/// Append-only (UPDATE/DELETE blocked by a database trigger).
+model InternalEventAuditLog {
+  id             String        @id @default(cuid())
+  eventId        String
+  event          InternalEvent @relation(fields: [eventId], references: [id])
+  action         String
+  changedById    String?
+  changedBy      Employee?     @relation(fields: [changedById], references: [id])
+  previousValues Json?
+  newValues      Json?
+  createdAt      DateTime      @default(now())
+
+  @@index([eventId, createdAt])
+}
+
+/// Request to keep WFH on the date of a mandatory in-office event (approved by the leader).
+model InternalEventConflictException {
+  id         String         @id @default(cuid())
+  eventId    String
+  event      InternalEvent  @relation(fields: [eventId], references: [id])
+  employeeId String
+  employee   Employee       @relation(fields: [employeeId], references: [id])
+  date       DateTime       @db.Date
+  reason     String
+  status     RevisionStatus @default(PENDING)
+  decidedAt  DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([employeeId, date])
+  @@index([eventId])
+}
+
+// ───────────────────────────── People data (HR) ─────────────────────────────
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+/// Personal & HR data kept apart from the directory record (least privilege).
+/// NIK, NPWP and bank account numbers are encrypted at the application layer (AES-256-GCM);
+/// only the last 4 digits are stored in clear for display, plus a keyed hash of NIK for uniqueness.
+model EmployeePersonalData {
+  employeeId               String         @id
+  employee                 Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  birthDate                DateTime?      @db.Date
+  birthPlace               String?
+  phone                    String?
+  personalEmail            String?
+  addressKtp               String?
+  addressDomicile          String?
+  nikEncrypted             String?
+  nikLast4                 String?
+  nikHash                  String?        @unique
+  npwpEncrypted            String?
+  npwpLast4                String?
+  bankName                 String?
+  bankAccountEncrypted     String?
+  bankAccountLast4         String?
+  bankAccountHolder        String?
+  maritalStatus            MaritalStatus?
+  /// dependents counted for PTKP (children / family members, max 3 count for tax)
+  dependents               Int            @default(0)
+  emergencyContactName     String?
+  emergencyContactRelation String?
+  emergencyContactPhone    String?
+  updatedById              String?
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+}
+
+// ───────────────────────────── MIL Digital Workplace (Phase 1) ─────────────────────────────
+
+/// Extra permissions granted to a user on top of their role (e.g. "Client Manager" = client.manage + client.sensitive).
+model PermissionGrant {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission  String
+  note        String?
+  grantedById String?
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, permission])
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// Company 101 sections (About MIL). Keyed so pages can reference a section; text is lightweight Markdown.
+model CompanyContentSection {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  title       String
+  body        String   @default("")
+  sortOrder   Int      @default(0)
+  isPublished Boolean  @default(true)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CompanyRegulation {
+  id                      String             @id @default(cuid())
+  title                   String
+  category                String
+  status                  ContentStatus      @default(DRAFT)
+  ownerId                 String?
+  owner                   Employee?          @relation("RegulationOwner", fields: [ownerId], references: [id])
+  requiresAcknowledgement Boolean            @default(false)
+  publishedVersionId      String?            @unique
+  publishedVersion        RegulationVersion? @relation("PublishedRegulationVersion", fields: [publishedVersionId], references: [id])
+  createdById             String?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  versions         RegulationVersion[]         @relation("RegulationVersions")
+  acknowledgements RegulationAcknowledgement[]
+
+  @@index([status, category])
+}
+
+/// Revision history. A published version is never edited; changes become a new draft version.
+model RegulationVersion {
+  id            String            @id @default(cuid())
+  regulationId  String
+  regulation    CompanyRegulation @relation("RegulationVersions", fields: [regulationId], references: [id])
+  version       Int
+  title         String
+  summary       String?
+  body          String
+  effectiveDate DateTime          @db.Date
+  documentUrl   String?
+  attachmentId  String?
+  attachment    StoredFile?       @relation("RegulationAttachment", fields: [attachmentId], references: [id])
+  changeNote    String?
+  createdById   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  publishedAt   DateTime?
+
+  publishedFor     CompanyRegulation?          @relation("PublishedRegulationVersion")
+  acknowledgements RegulationAcknowledgement[]
+
+  @@unique([regulationId, version])
+}
+
+model RegulationAcknowledgement {
+  id             String            @id @default(cuid())
+  regulationId   String
+  regulation     CompanyRegulation @relation(fields: [regulationId], references: [id])
+  versionId      String
+  version        RegulationVersion @relation(fields: [versionId], references: [id])
+  employeeId     String
+  employee       Employee          @relation(fields: [employeeId], references: [id])
+  acknowledgedAt DateTime          @default(now())
+
+  @@unique([versionId, employeeId])
+  @@index([employeeId])
+}
+
+enum AnnouncementPriority {
+  NORMAL
+  IMPORTANT
+  CRITICAL
+}
+
+enum AudienceType {
+  ALL
+  TEAMS
+  LEVELS
+  EMPLOYEES
+}
+
+model Announcement {
+  id           String               @id @default(cuid())
+  title        String
+  body         String
+  category     String
+  priority     AnnouncementPriority @default(NORMAL)
+  status       ContentStatus        @default(DRAFT)
+  publishAt    DateTime
+  expiresAt    DateTime?
+  audienceType AudienceType         @default(ALL)
+  linkUrl      String?
+  attachmentId String?
+  attachment   StoredFile?          @relation("AnnouncementAttachment", fields: [attachmentId], references: [id])
+  createdById  String
+  createdBy    Employee             @relation("AnnouncementAuthor", fields: [createdById], references: [id])
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  audience AnnouncementAudience[]
+
+  @@index([status, publishAt])
+}
+
+model AnnouncementAudience {
+  id             String         @id @default(cuid())
+  announcementId String
+  announcement   Announcement   @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  teamId         String?
+  team           Team?          @relation(fields: [teamId], references: [id])
+  levelId        String?
+  level          EmployeeLevel? @relation(fields: [levelId], references: [id])
+  employeeId     String?
+  employee       Employee?      @relation("AnnouncementTarget", fields: [employeeId], references: [id])
+
+  @@index([announcementId])
+}
+
+enum RecognitionKind {
+  PROMOTION
+  RECOGNITION
+  MILESTONE
+}
+
+/// Manual recognition entries. Birthdays, anniversaries and level promotions are derived from master data.
+model EmployeeRecognition {
+  id          String          @id @default(cuid())
+  employeeId  String
+  employee    Employee        @relation("RecognitionSubject", fields: [employeeId], references: [id])
+  kind        RecognitionKind
+  title       String
+  message     String?
+  date        DateTime        @db.Date
+  status      ContentStatus   @default(PUBLISHED)
+  createdById String
+  createdBy   Employee        @relation("RecognitionAuthor", fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([status, date])
+}
+
+// ── Client & Portfolio ──
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  FREEZE
+}
+
+enum ClientRole {
+  CONSULTANT_PRIMARY
+  CONSULTANT_SECONDARY
+  CONSULTANT_ADDITIONAL
+  ADS_STRATEGIST
+}
+
+model ClientPackage {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  engagementPackages ClientEngagementPackage[]
+}
+
+/// Optional legal/business parent. One organization can own several brands.
+model ClientOrganization {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  legalName String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  brands ClientBrand[]
+}
+
+/// The Client Directory record. `clientCode` is the user-facing "Client ID" (e.g. MIL-CL-0001):
+/// a unique, never-reused business identifier of the brand handled by MIL, independent of `id`.
+model ClientBrand {
+  id                      String              @id @default(cuid())
+  clientCode              String              @unique
+  organizationId          String?
+  organization            ClientOrganization? @relation(fields: [organizationId], references: [id])
+  name                    String
+  /// Cache of the status-history row covering today; always written in the same transaction as the history.
+  status                  ClientStatus
+  /// First day of the first collaboration — never overwritten by reactivation.
+  dateStart               DateTime            @db.Date
+  /// End of the latest collaboration while Inactive.
+  dateOff                 DateTime?           @db.Date
+  industry                String?
+  description             String?
+  websiteUrl              String?
+  instagramUrl            String?
+  tiktokUrl               String?
+  picName                 String?
+  picContact              String?
+  internalNotes           String?
+  primaryConsultantWaived Boolean             @default(false)
+  waiverReason            String?
+  archivedAt              DateTime?
+  createdById             String?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  engagements   ClientEngagement[]
+  statusHistory ClientStatusHistory[]
+  assignments   ClientTeamAssignment[]
+  codeAliases   ClientCodeAlias[]
+
+  @@index([status])
+  @@index([name])
+}
+
+/// Retired Client IDs (after an authorised ID change) so they are never reused.
+model ClientCodeAlias {
+  code      String      @id
+  brandId   String
+  brand     ClientBrand @relation(fields: [brandId], references: [id])
+  retiredAt DateTime    @default(now())
+}
+
+/// A continuous collaboration period. Inactive closes it; reactivation opens a new one. Freeze stays inside it.
+model ClientEngagement {
+  id        String      @id @default(cuid())
+  brandId   String
+  brand     ClientBrand @relation(fields: [brandId], references: [id])
+  startDate DateTime    @db.Date
+  endDate   DateTime?   @db.Date
+  createdAt DateTime    @default(now())
+
+  packages ClientEngagementPackage[]
+
+  @@index([brandId, startDate])
+}
+
+/// Effective-dated package of an engagement (one primary package at a time in Phase 1).
+model ClientEngagementPackage {
+  id            String           @id @default(cuid())
+  engagementId  String
+  engagement    ClientEngagement @relation(fields: [engagementId], references: [id])
+  packageId     String
+  package       ClientPackage    @relation(fields: [packageId], references: [id])
+  effectiveFrom DateTime         @db.Date
+  effectiveTo   DateTime?        @db.Date
+  changedById   String?
+  createdAt     DateTime         @default(now())
+
+  @@index([engagementId, effectiveFrom])
+}
+
+/// Effective-dated status periods; monthly reporting reads the row covering the reporting date.
+model ClientStatusHistory {
+  id            String        @id @default(cuid())
+  brandId       String
+  brand         ClientBrand   @relation(fields: [brandId], references: [id])
+  fromStatus    ClientStatus?
+  status        ClientStatus
+  effectiveFrom DateTime      @db.Date
+  effectiveTo   DateTime?     @db.Date
+  reason        String?
+  changedById   String?
+  changedBy     Employee?     @relation("ClientStatusChangedBy", fields: [changedById], references: [id])
+  createdAt     DateTime      @default(now())
+
+  @@index([brandId, effectiveFrom])
+  @@index([status, effectiveFrom])
+}
+
+/// Client ↔ employee assignment. Removal sets effectiveTo; rows are never deleted.
+model ClientTeamAssignment {
+  id            String      @id @default(cuid())
+  brandId       String
+  brand         ClientBrand @relation(fields: [brandId], references: [id])
+  employeeId    String
+  employee      Employee    @relation("ClientAssignments", fields: [employeeId], references: [id])
+  role          ClientRole
+  effectiveFrom DateTime    @db.Date
+  effectiveTo   DateTime?   @db.Date
+  assignedById  String?
+  endedById     String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([brandId, effectiveTo])
+  @@index([employeeId, effectiveTo])
+}

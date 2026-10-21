@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/* ───────── MIL Digital design tokens (aligned with the ATLAS visual language) ───────── */
+@theme {
+  /* Headline: SF Pro (system on Apple devices). Body: Product Sans → Google Sans fallback. */
+  --font-display: "SF Pro Display", "SF Pro", -apple-system, BlinkMacSystemFont, "Google Sans", "Helvetica Neue", system-ui, sans-serif;
+  --font-sans: "Product Sans", "Google Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
+
+  --color-ink: #0a0f1f;
+  --color-ink-2: #2b3450;
+  --color-muted: #5b6480;
+  --color-subtle: #8a93ad;
+  --color-line: #e3e9f3;
+  --color-line-2: #eef2f8;
+  --color-canvas: #f4f7fc;
+  --color-surface: #ffffff;
+
+  --color-brand-50: #eef3ff;
+  --color-brand-100: #dde7ff;
+  --color-brand-200: #bccffe;
+  --color-brand-300: #8eaefc;
+  --color-brand-400: #4f82f7;
+  --color-brand-500: #1f63ee; /* logo blue */
+  --color-brand-600: #1d4fd6;
+  --color-brand-700: #1f37a6; /* CTA navy / headline blue */
+  --color-brand-800: #192d86;
+  --color-brand-900: #13226a;
+
+  /* Calendar semantics */
+  --color-wfo: #1f37a6;
+  --color-wfo-soft: #e3e9ff;
+  --color-wfh: #6ea2ff;
+  --color-wfh-soft: #e6f0ff;
+  --color-leave: #7c3aed;
+  --color-leave-soft: #f1eaff;
+  --color-permission: #d97706;
+  --color-permission-soft: #fff4dc;
+  --color-holiday: #8a93ad;
+  --color-holiday-soft: #f0f2f6;
+  --color-pending: #ea580c;
+  --color-pending-soft: #fff0e5;
+  --color-offsite: #0f766e;
+  --color-offsite-soft: #dcf5f1;
+
+  --color-success: #0f9d58;
+  --color-success-soft: #e3f6ec;
+  --color-warning: #c27803;
+  --color-warning-soft: #fff6dd;
+  --color-danger: #d93025;
+  --color-danger-soft: #fdecea;
+
+  --radius-xl: 14px;
+  --radius-2xl: 20px;
+  --radius-3xl: 28px;
+
+  --shadow-card: 0 1px 2px rgba(16, 32, 90, 0.04), 0 4px 16px rgba(16, 32, 90, 0.05);
+  --shadow-pop: 0 10px 40px rgba(16, 32, 90, 0.14);
+  --shadow-chip: 0 6px 24px rgba(31, 55, 166, 0.12);
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: var(--color-brand-100);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+/* Hero grid like the ATLAS landing page */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(31, 55, 166, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(31, 55, 166, 0.055) 1px, transparent 1px);
+  background-size: 88px 88px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.animate-float { animation: float-y 6s ease-in-out infinite; }
+.animate-float-delayed { animation: float-y 6s ease-in-out 1.5s infinite; }

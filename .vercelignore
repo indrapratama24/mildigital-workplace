@@ -1,0 +1,11 @@
+.local-pg
+storage/uploads
+.next
+node_modules
+.env
+.agents
+.claude
+skills-lock.json
+tests
+docs
+.secrets

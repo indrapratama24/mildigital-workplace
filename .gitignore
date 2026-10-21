@@ -1,0 +1,15 @@
+node_modules
+.next
+.env
+.local-pg
+storage/uploads/*
+!storage/uploads/.gitkeep
+*.tsbuildinfo
+next-env.d.ts
+coverage
+.vercel
+.env*
+.env*.local
+.secrets
+!.env.example
+.DS_Store
