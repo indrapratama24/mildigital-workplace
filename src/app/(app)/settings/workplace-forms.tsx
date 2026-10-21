@@ -9,7 +9,7 @@ import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/field"
 import { Dialog } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/misc";
-import { RichText } from "@/components/app/rich-text";
+import { RichEditor } from "@/components/app/editor/rich-editor";
 
 type Result = { ok: boolean; error?: string; message?: string; data?: unknown };
 function useRun() {
@@ -26,7 +26,7 @@ function useRun() {
   return { pending, run };
 }
 
-const MD_HINT = "Formatting: # Heading, - bullet, 1. numbered, **bold**, *italic*, [link](https://…)";
+type Person = { id: string; name: string };
 
 // ───────────── Client packages & rules ─────────────
 
@@ -139,10 +139,9 @@ export function PlatformForm({ knowledgeHubUrl }: { knowledgeHubUrl: string | nu
 
 type Section = { id?: string; title: string; body: string; isPublished: boolean; sortOrder: number };
 
-export function SectionEditor({ section }: { section?: Section & { id: string } }) {
+export function SectionEditor({ section, people = [] }: { section?: Section & { id: string }; people?: Person[] }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<Section>(section ?? { title: "", body: "", isPublished: true, sortOrder: 50 });
-  const [preview, setPreview] = useState(false);
   const { pending, run } = useRun();
   return (
     <>
@@ -154,7 +153,7 @@ export function SectionEditor({ section }: { section?: Section & { id: string } 
       <Dialog
         open={open}
         onOpenChange={setOpen}
-        className="sm:max-w-3xl"
+        className="sm:max-w-5xl"
         title={section ? `Edit · ${section.title}` : "New section"}
         footer={
           <>
@@ -167,15 +166,9 @@ export function SectionEditor({ section }: { section?: Section & { id: string } 
           <Field label="Title"><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
           <Field label="Order"><Input type="number" value={f.sortOrder} onChange={(e) => setF({ ...f, sortOrder: Number(e.target.value) })} /></Field>
         </div>
-        <div className="mt-3 flex gap-1 text-[12.5px]">
-          <button type="button" onClick={() => setPreview(false)} className={`rounded-full px-3 py-1 ${!preview ? "bg-brand-700 text-white" : "text-ink-2"}`}>Write</button>
-          <button type="button" onClick={() => setPreview(true)} className={`rounded-full px-3 py-1 ${preview ? "bg-brand-700 text-white" : "text-ink-2"}`}>Preview</button>
+        <div className="mt-3">
+          {open && <RichEditor value={f.body} onChange={(body) => setF((p) => ({ ...p, body }))} people={people} minHeight={320} />}
         </div>
-        {preview ? (
-          <div className="mt-2 min-h-[240px] rounded-xl border border-line-2 p-4">{f.body.trim() ? <RichText text={f.body} /> : <p className="text-muted">Nothing yet.</p>}</div>
-        ) : (
-          <Field label="Content" hint={MD_HINT} className="mt-2"><Textarea value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} className="min-h-[240px] font-mono text-[13px]" /></Field>
-        )}
         <div className="mt-3"><Checkbox checked={f.isPublished} onChange={(e) => setF({ ...f, isPublished: e.target.checked })} label="Visible in the Company Hub" /></div>
       </Dialog>
     </>
@@ -259,7 +252,7 @@ export function RegulationEditor({
       <Dialog
         open={open}
         onOpenChange={setOpen}
-        className="sm:max-w-3xl"
+        className="sm:max-w-5xl"
         title={id ? (isRevision ? "New revision (draft)" : "Edit draft") : "New regulation (draft)"}
         description={isRevision ? "The published version stays live until you publish this revision. Published versions never change." : "Saved as a draft. Publish it when it's ready for employees."}
         footer={
@@ -279,7 +272,10 @@ export function RegulationEditor({
           <Field label="Owner"><Select value={f.ownerId} onChange={(e) => set("ownerId", e.target.value)}><option value="">— None —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
           <Field label="Document URL"><Input value={f.documentUrl} onChange={(e) => set("documentUrl", e.target.value)} placeholder="https://drive.google.com/…" /></Field>
           <Field label="Short description" className="sm:col-span-2"><Input value={f.summary} onChange={(e) => set("summary", e.target.value)} maxLength={500} /></Field>
-          <Field label="Content" hint={MD_HINT} className="sm:col-span-2"><Textarea value={f.body} onChange={(e) => set("body", e.target.value)} className="min-h-[200px] font-mono text-[13px]" /></Field>
+          <div className="sm:col-span-2">
+            <div className="mb-1.5 text-[13px] font-medium text-ink">Content</div>
+            {open && <RichEditor value={f.body} onChange={(v) => set("body", v)} people={people} />}
+          </div>
           <Field label="Attachment" className="sm:col-span-2"><AttachmentField value={f.attachment} onChange={(v) => set("attachment", v)} /></Field>
           {isRevision && <Field label="What changed?" className="sm:col-span-2"><Input value={f.changeNote} onChange={(e) => set("changeNote", e.target.value)} /></Field>}
           <div className="sm:col-span-2"><Checkbox checked={f.requiresAcknowledgement} onChange={(e) => set("requiresAcknowledgement", e.target.checked)} label="Employees must acknowledge this regulation" description="Each published version asks every active employee to confirm they've read it." /></div>
@@ -361,7 +357,7 @@ export function AnnouncementEditor({
       <Dialog
         open={open}
         onOpenChange={setOpen}
-        className="sm:max-w-3xl"
+        className="sm:max-w-5xl"
         title={id ? "Edit announcement" : "New announcement"}
         footer={
           <>
@@ -386,7 +382,10 @@ export function AnnouncementEditor({
           </Field>
           <Field label="Publish at (WIB)" required><Input type="datetime-local" value={f.publishAt} onChange={(e) => set("publishAt", e.target.value)} /></Field>
           <Field label="Expires at (optional)"><Input type="datetime-local" value={f.expiresAt} onChange={(e) => set("expiresAt", e.target.value)} /></Field>
-          <Field label="Content" hint={MD_HINT} className="sm:col-span-2"><Textarea value={f.body} onChange={(e) => set("body", e.target.value)} className="min-h-[160px]" /></Field>
+          <div className="sm:col-span-2">
+            <div className="mb-1.5 text-[13px] font-medium text-ink">Content</div>
+            {open && <RichEditor value={f.body} onChange={(v) => set("body", v)} people={people} minHeight={200} />}
+          </div>
           <Field label="Target audience">
             <Select value={f.audienceType} onChange={(e) => set("audienceType", e.target.value as AnnouncementFormValues["audienceType"])}>
               <option value="ALL">All employees</option>

@@ -14,7 +14,7 @@ const ALLOWED: Record<string, (b: Buffer) => boolean> = {
 };
 
 /** Validates type by magic bytes (not the client-provided MIME), size, and stores privately. */
-export async function saveUpload(actor: CurrentUser, file: File, opts: { sensitive: boolean }) {
+export async function saveUpload(actor: CurrentUser, file: File, opts: { sensitive: boolean; contentAsset?: boolean }) {
   const maxMb = Number(process.env.UPLOAD_MAX_MB ?? 5);
   if (!file || file.size === 0) throw invalid("Choose a file to upload.");
   if (file.size > maxMb * 1024 * 1024) throw invalid(`Files must be ${maxMb} MB or smaller.`);
@@ -25,7 +25,7 @@ export async function saveUpload(actor: CurrentUser, file: File, opts: { sensiti
   await getStorage().put(key, buf);
   const name = file.name.replace(/[^\w.\- ()]/g, "_").slice(0, 120) || "document";
   return db.storedFile.create({
-    data: { ownerId: actor.userId, originalName: name, mimeType: mime, size: buf.length, storageKey: key, sha256: createHash("sha256").update(buf).digest("hex"), isSensitive: opts.sensitive },
+    data: { ownerId: actor.userId, originalName: name, mimeType: mime, size: buf.length, storageKey: key, sha256: createHash("sha256").update(buf).digest("hex"), isSensitive: opts.sensitive, isContentAsset: !!opts.contentAsset },
   });
 }
 
@@ -43,7 +43,7 @@ export async function authorizeFileAccess(viewer: CurrentUser, fileId: string) {
   if (!file) throw notFound("File");
   if (file.ownerId === viewer.userId) return file;
   // Workplace content: profile photos, announcement and published regulation attachments are company-internal.
-  if (file.employeePhoto || file.announcements.length || file.regulationVersions.some((v) => v.publishedAt)) return file;
+  if (file.isContentAsset || file.employeePhoto || file.announcements.length || file.regulationVersions.some((v) => v.publishedAt)) return file;
   if (file.regulationVersions.length && can(viewer, "content.manage")) return file;
   if (file.request) {
     const r = file.request;

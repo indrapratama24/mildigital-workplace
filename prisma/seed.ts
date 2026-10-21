@@ -80,6 +80,7 @@ async function main() {
       data: { employeeCode: p.code, fullName: p.name, email: p.email, jobTitle: p.title, departmentId: depts[p.dept].id, startDate: d(p.start), userId: user.id },
     });
     ids[p.key] = emp.id;
+    await db.employee.update({ where: { id: emp.id }, data: { nickname: p.name.split(" ")[0] } });
     await db.employeeTeamMembership.create({ data: { employeeId: emp.id, teamId: teams[p.team].id, effectiveFrom: d(p.start) } });
   }
   for (const p of people) {
@@ -339,6 +340,29 @@ async function main() {
       how_we_work: `We work hybrid: collective office days per level, flexible days for focus work. Plans are made monthly in **My Work Calendar** and approved by your leader.\n\n${demo}`,
       office: `Office hours: 09:00–18:00 WIB, Monday to Friday.\n\n${demo}`,
     };
+    const p = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    sections.facilities = JSON.stringify({
+      type: "doc",
+      content: [
+        { type: "callout", attrs: { tone: "info" }, content: [p("Book meeting rooms in the Internal Calendar. (Demo content — replace in Settings → About MIL.)")] },
+        {
+          type: "table",
+          content: [
+            { type: "tableRow", content: ["Room", "Capacity", "Equipment"].map((t) => ({ type: "tableHeader", content: [p(t)] })) },
+            { type: "tableRow", content: ["Ruang Bandung", "8", "TV, whiteboard"].map((t) => ({ type: "tableCell", content: [p(t)] })) },
+            { type: "tableRow", content: ["Ruang Ciroyom", "4", "Video call kit"].map((t) => ({ type: "tableCell", content: [p(t)] })) },
+          ],
+        },
+        {
+          type: "columns",
+          content: [
+            { type: "column", content: [{ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: "Pantry" }] }, p("Coffee and snacks every day.")] },
+            { type: "column", content: [{ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: "Parking" }] }, p("Motorbike and car parking in front of the building.")] },
+          ],
+        },
+        { type: "taskList", content: [{ type: "taskItem", attrs: { checked: true }, content: [p("Bring your access card")] }, { type: "taskItem", attrs: { checked: false }, content: [p("Clean the room after meetings")] }] },
+      ],
+    });
     for (const [key, body] of Object.entries(sections)) {
       const s = await db.companyContentSection.findUnique({ where: { key } });
       if (s) await saveSection(indra, { id: s.id, title: s.title, body, isPublished: true, sortOrder: s.sortOrder });

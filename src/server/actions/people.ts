@@ -13,6 +13,7 @@ export async function updatePersonalDataAction(employeeId: string, input: unknow
     const p = z
       .object({
         joinDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid join date").optional(),
+        nickname: z.string().max(40).nullable().optional(),
         birthDate: opt,
         birthPlace: opt,
         phone: opt,

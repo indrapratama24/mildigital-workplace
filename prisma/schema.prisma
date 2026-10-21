@@ -239,6 +239,7 @@ model Team {
 model Employee {
   id               String           @id @default(cuid())
   employeeCode     String           @unique
+  nickname         String?
   userId           String?          @unique
   user             User?            @relation(fields: [userId], references: [id])
   fullName         String
@@ -696,16 +697,18 @@ model DelegationAssignment {
 }
 
 model StoredFile {
-  id           String   @id @default(cuid())
-  ownerId      String
-  owner        User     @relation(fields: [ownerId], references: [id])
-  originalName String
-  mimeType     String
-  size         Int
-  storageKey   String   @unique
-  sha256       String
-  isSensitive  Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  id             String   @id @default(cuid())
+  ownerId        String
+  owner          User     @relation(fields: [ownerId], references: [id])
+  originalName   String
+  mimeType       String
+  size           Int
+  storageKey     String   @unique
+  sha256         String
+  isSensitive    Boolean  @default(false)
+  /// Inserted into Company Hub content (images, files) — readable by every signed-in employee.
+  isContentAsset Boolean  @default(false)
+  createdAt      DateTime @default(now())
 
   request            Request?              @relation("RequestDocument")
   delegation         DelegationAssignment? @relation("DelegationAttachment")

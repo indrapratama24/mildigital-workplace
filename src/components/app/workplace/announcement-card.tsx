@@ -2,13 +2,14 @@ import Link from "next/link";
 import { Paperclip } from "lucide-react";
 import type { AnnouncementPriority } from "@prisma/client";
 import { formatDateTime } from "@/lib/dates";
+import { docToText } from "@/lib/content/format";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 
 type A = { id: string; title: string; body: string; category: string; priority: AnnouncementPriority; publishAt: Date; createdBy: { fullName: string }; attachment?: { id: string } | null };
 
 export function AnnouncementCard({ a, compact }: { a: A; compact?: boolean }) {
-  const plain = a.body.replace(/[#*_[\]()>`-]/g, " ").replace(/\s+/g, " ").trim();
+  const plain = docToText(a.body, 300);
   return (
     <Link
       href={`/company/announcements/${a.id}`}

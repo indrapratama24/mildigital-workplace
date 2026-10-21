@@ -8,7 +8,8 @@ import { formatDate, formatDateTime, toISO } from "@/lib/dates";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Notice, Table } from "@/components/ui/misc";
-import { RichText } from "@/components/app/rich-text";
+import { ContentBody } from "@/components/app/content-body";
+import { isEmptyContent } from "@/server/content";
 import { AcknowledgeButton } from "@/components/app/workplace/ack-button";
 
 export default async function RegulationPage({ params }: { params: Promise<{ id: string }> }) {
@@ -31,7 +32,7 @@ export default async function RegulationPage({ params }: { params: Promise<{ id:
             <div className="flex flex-wrap items-center gap-1.5"><Badge tone="brand">{r.category}</Badge><Badge>v{v.version}</Badge></div>
             <h2 className="font-display text-[26px] font-extrabold tracking-tight text-ink">{v.title}</h2>
             {v.summary && <p className="text-[15px] text-muted">{v.summary}</p>}
-            {v.body.trim() && <RichText text={v.body} />}
+            {!isEmptyContent(v.body) && <ContentBody body={v.body} />}
             <div className="flex flex-wrap gap-2">
               {v.documentUrl && <a href={v.documentUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-[13px] font-medium text-brand-700 hover:border-brand-300"><ExternalLink className="h-3.5 w-3.5" /> Open document</a>}
               {v.attachment && <a href={`/api/files/${v.attachment.id}`} className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-[13px] font-medium text-brand-700 hover:border-brand-300"><Paperclip className="h-3.5 w-3.5" /> {v.attachment.originalName}</a>}

@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db";
 import { DomainError } from "@/server/errors";
-import { getProfile, listDirectory, ptkp, revealSensitive, setVisibility, tenure, updatePersonalData } from "@/server/services/people";
+import { directoryHighlights, getProfile, listDirectory, ptkp, revealSensitive, setVisibility, tenure, updatePersonalData } from "@/server/services/people";
 import { fromISO } from "@/lib/dates";
 import { buildOrg, resetDb, type Org } from "./helpers";
 
@@ -129,5 +129,30 @@ describe("join date", () => {
     expect(e.reportsTo[0].effectiveFrom.toISOString().slice(0, 10)).toBe("2024-03-01");
     expect((await getProfile(await org.actor("designer"), org.ids.junior)).tenure?.label).toBe("2 yrs 8 mo");
     expect(await db.auditLog.count({ where: { action: "employee.join_date.update" } })).toBe(1);
+  });
+});
+
+describe("Directory highlights & nickname", () => {
+  it("employees set their own nickname; it is searchable", async () => {
+    await updatePersonalData(await org.actor("junior"), org.ids.junior, { nickname: "Juju" });
+    await expectError(updatePersonalData(await org.actor("junior"), org.ids.peer, { nickname: "X" }), "FORBIDDEN");
+    const { rows } = await listDirectory(await org.actor("designer"), { q: "juju" });
+    expect(rows.map((r) => r.id)).toEqual([org.ids.junior]);
+    expect(rows[0].nickname).toBe("Juju");
+  });
+
+  it("shows team leads and who is out (category only, approved only)", async () => {
+    const team = await db.team.findFirstOrThrow({ where: { name: { not: "Creative Studio" } } });
+    await db.team.update({ where: { id: team.id }, data: { leadId: org.ids.leader } });
+    const base = { reason: "Family matters", idempotencyKey: "k", requestTypeId: org.types.SICK };
+    await db.request.create({ data: { ...base, employeeId: org.ids.junior, status: "APPROVED", startDate: fromISO("2026-11-01"), endDate: fromISO("2026-11-04") } });
+    await db.request.create({ data: { ...base, employeeId: org.ids.peer, status: "PENDING_LEADER", startDate: fromISO("2026-11-02"), endDate: fromISO("2026-11-02") } });
+    await db.request.create({ data: { ...base, employeeId: org.ids.principal, status: "APPROVED", startDate: fromISO("2026-11-20"), endDate: fromISO("2026-11-21") } });
+    const hl = await directoryHighlights(7);
+    expect(hl.teams.find((t) => t.id === team.id)?.lead?.id).toBe(org.ids.leader);
+    expect(hl.out).toHaveLength(1);
+    expect(hl.out[0]).toMatchObject({ kind: "Leave", now: true, end: "2026-11-04", employee: { id: org.ids.junior } });
+    expect(JSON.stringify(hl.out)).not.toContain("Sick");
+    expect(JSON.stringify(hl.out)).not.toContain("Family");
   });
 });

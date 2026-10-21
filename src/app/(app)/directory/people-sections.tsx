@@ -39,6 +39,7 @@ export function PeopleSections({ profile: p }: { profile: Profile }) {
           <CardHeader title="General" action={(p.isSelf || p.canEditAll) && <Button size="sm" variant="secondary" onClick={() => setEdit(true)}><Pencil className="h-3.5 w-3.5" /> Edit {p.isSelf && !p.canEditAll ? "my details" : "personal data"}</Button>} />
           <CardBody className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
             <Item icon={IdCard} label="Employee ID" value={p.code} />
+            {p.nickname && <Item icon={IdCard} label="Nickname" value={p.nickname} />}
             <Item icon={Users2} label="Team" value={p.teams.map((t) => t.name).join(", ") || null} />
             <Item icon={Briefcase} label="Level" value={p.level} />
             <Item icon={Users2} label="Leader" value={p.leaders.length ? p.leaders.map((l) => `${l.fullName}${l.type === "SECONDARY" ? " (secondary)" : ""}`).join(", ") : null} />
@@ -176,6 +177,7 @@ function EditDialog({ open, onOpenChange, profile: p }: { open: boolean; onOpenC
   const save = () =>
     start(async () => {
       const selfFields = {
+        nickname: f.nickname.trim() || null,
         phone: f.phone || null,
         personalEmail: f.personalEmail || null,
         addressDomicile: f.addressDomicile || null,
@@ -229,6 +231,8 @@ function EditDialog({ open, onOpenChange, profile: p }: { open: boolean; onOpenC
             </Section>
         )}
         <Section title="Contact">
+          <Field label="Nickname" hint="What colleagues call you, e.g. “Indra”."><Input value={f.nickname} onChange={(ev) => set("nickname", ev.target.value)} maxLength={40} /></Field>
+          <div className="hidden sm:block" />
           <Field label="Phone"><Input value={f.phone} onChange={(ev) => set("phone", ev.target.value)} placeholder="+62 812-3456-7890" /></Field>
           <Field label="Personal email"><Input type="email" value={f.personalEmail} onChange={(ev) => set("personalEmail", ev.target.value)} /></Field>
           <Field label="Domicile address" className="sm:col-span-2"><Textarea value={f.addressDomicile} onChange={(ev) => set("addressDomicile", ev.target.value)} className="min-h-[60px]" /></Field>

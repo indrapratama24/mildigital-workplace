@@ -147,7 +147,7 @@ export async function listDirectory(viewer: CurrentUser, f: DirectoryFilters = {
   const employees = await db.employee.findMany({
     where: {
       isActive: status === "all" ? undefined : status === "active",
-      ...(f.q ? { OR: [{ fullName: { contains: f.q, mode: "insensitive" } }, { employeeCode: { contains: f.q, mode: "insensitive" } }, { jobTitle: { contains: f.q, mode: "insensitive" } }] } : {}),
+      ...(f.q ? { OR: [{ fullName: { contains: f.q, mode: "insensitive" } }, { nickname: { contains: f.q, mode: "insensitive" } }, { employeeCode: { contains: f.q, mode: "insensitive" } }, { jobTitle: { contains: f.q, mode: "insensitive" } }] } : {}),
       memberships: f.teamId ? { some: { teamId: f.teamId, ...effectiveOn(today) } } : undefined,
       levelAssignments: f.levelId ? { some: { levelId: f.levelId, ...effectiveOn(today) } } : undefined,
       reportsTo: f.leaderId ? { some: { leaderId: f.leaderId, ...effectiveOn(today) } } : undefined,
@@ -175,6 +175,7 @@ export async function listDirectory(viewer: CurrentUser, f: DirectoryFilters = {
       id: e.id,
       code: e.employeeCode,
       name: e.fullName,
+      nickname: e.nickname,
       title: e.jobTitle,
       isActive: e.isActive,
       role: e.user?.role ?? null,
@@ -262,6 +263,7 @@ export async function getProfile(viewer: CurrentUser, employeeId: string) {
     id: e.id,
     code: e.employeeCode,
     name: e.fullName,
+    nickname: e.nickname,
     title: e.jobTitle,
     isActive: e.isActive,
     role: e.user?.role ?? null,
@@ -300,6 +302,7 @@ export async function getProfile(viewer: CurrentUser, employeeId: string) {
     // raw values for edit forms (only for people allowed to edit them; sensitive numbers are never prefilled)
     editable: ctx.isHR || isSelf ? {
       joinDate: start,
+      nickname: e.nickname ?? "",
       birthDate: birth ?? "",
       birthPlace: p?.birthPlace ?? "",
       phone: p?.phone ?? "",
@@ -331,6 +334,8 @@ export type Profile = Awaited<ReturnType<typeof getProfile>>;
 export interface PersonalInput {
   /** HR only: employment start date (join date) */
   joinDate?: string;
+  /** Short name colleagues use (self-service). */
+  nickname?: string | null;
   birthDate?: string | null;
   birthPlace?: string | null;
   phone?: string | null;
@@ -350,7 +355,7 @@ export interface PersonalInput {
 }
 
 /** Fields an employee may maintain themselves; everything else (identity, bank, family, birth data) is HR-verified. */
-export const SELF_SERVICE_FIELDS: (keyof PersonalInput)[] = ["phone", "personalEmail", "addressDomicile", "emergencyContactName", "emergencyContactRelation", "emergencyContactPhone"];
+export const SELF_SERVICE_FIELDS: (keyof PersonalInput)[] = ["nickname", "phone", "personalEmail", "addressDomicile", "emergencyContactName", "emergencyContactRelation", "emergencyContactPhone"];
 
 const PHONE = /^\+?[0-9][0-9\s-]{7,17}$/;
 const clean = (v: string | null | undefined) => (v === undefined ? undefined : v === null ? null : v.trim() || null);
@@ -381,11 +386,17 @@ export async function updatePersonalData(actor: CurrentUser, employeeId: string,
   const acct = input.bankAccountNumber === undefined ? undefined : (input.bankAccountNumber ?? "").replace(/[\s-]/g, "");
   if (acct && !/^\d{5,20}$/.test(acct)) errs.push("Bank account number must be 5–20 digits.");
   if (input.dependents !== undefined && (!Number.isInteger(input.dependents) || input.dependents < 0 || input.dependents > 10)) errs.push("Dependents must be 0–10.");
+  const nickname = clean(input.nickname);
+  if (nickname && nickname.length > 40) errs.push("Nickname is too long (40 characters max).");
   if (errs.length) throw invalid(errs[0], { errors: errs });
 
   return withTx(async (tx) => {
     const emp = await tx.employee.findUnique({ where: { id: employeeId } });
     if (!emp) throw notFound("Employee");
+    if (nickname !== undefined && nickname !== emp.nickname) {
+      await tx.employee.update({ where: { id: employeeId }, data: { nickname } });
+      await audit(tx, { actorUserId: actor.userId, action: "employee.nickname.update", entityType: "Employee", entityId: employeeId, before: { nickname: emp.nickname }, after: { nickname } });
+    }
     const before = await tx.employeePersonalData.findUnique({ where: { employeeId } });
     const data: Record<string, unknown> = { updatedById: actor.employeeId };
     const set = (k: string, v: unknown) => {
@@ -477,4 +488,67 @@ export async function setProfilePhoto(actor: CurrentUser, employeeId: string, fi
     await tx.employee.update({ where: { id: employeeId }, data: { photoId: fileId } });
     await audit(tx, { actorUserId: actor.userId, action: "employee.photo.update", entityType: "Employee", entityId: employeeId, before: { photoId: emp.photoId }, after: { photoId: fileId } });
   });
+}
+
+// ───────────────────────────── Directory highlights ─────────────────────────────
+
+/**
+ * Who leads which team, and who is out on approved leave / permission in the next `days` days.
+ * Only the category (leave vs permission) is shown — never the leave type or reason.
+ */
+export async function directoryHighlights(days = 7) {
+  const today = todayJakarta();
+  const until = addDays(today, days);
+  const [teams, out] = await Promise.all([
+    db.team.findMany({
+      where: { isActive: true },
+      include: {
+        department: { select: { name: true } },
+        lead: { select: { id: true, fullName: true, nickname: true, jobTitle: true, photoId: true, isActive: true } },
+        _count: { select: { memberships: { where: { ...effectiveOn(today), employee: { isActive: true } } } } },
+      },
+      orderBy: { name: "asc" },
+    }),
+    db.request.findMany({
+      where: {
+        status: "APPROVED",
+        requestType: { category: { in: ["LEAVE", "PERMISSION"] } },
+        startDate: { lte: fromISO(until) },
+        endDate: { gte: fromISO(today) },
+        employee: { isActive: true },
+      },
+      select: {
+        id: true,
+        startDate: true,
+        endDate: true,
+        durationType: true,
+        requestType: { select: { category: true } },
+        employee: { select: { id: true, fullName: true, nickname: true, photoId: true, memberships: { where: effectiveOn(today), select: { team: { select: { name: true } } }, take: 1 } } },
+      },
+      orderBy: [{ startDate: "asc" }, { employee: { fullName: "asc" } }],
+    }),
+  ]);
+  return {
+    teams: teams.map((t) => ({
+      id: t.id,
+      name: t.name,
+      department: t.department.name,
+      members: t._count.memberships,
+      lead: t.lead && t.lead.isActive ? { id: t.lead.id, name: t.lead.fullName, nickname: t.lead.nickname, title: t.lead.jobTitle, photoId: t.lead.photoId } : null,
+    })),
+    out: out.map((r) => {
+      const start = toISO(r.startDate);
+      const end = toISO(r.endDate);
+      return {
+        id: r.id,
+        employee: { id: r.employee.id, name: r.employee.fullName, nickname: r.employee.nickname, photoId: r.employee.photoId, team: r.employee.memberships[0]?.team.name ?? null },
+        kind: r.requestType.category === "LEAVE" ? ("Leave" as const) : ("Permission" as const),
+        start,
+        end,
+        now: start <= today,
+        halfDay: r.durationType === "HALF_DAY_AM" ? "morning" : r.durationType === "HALF_DAY_PM" ? "afternoon" : r.durationType === "HOURLY" ? "a few hours" : null,
+      };
+    }),
+    leadCount: new Set(teams.flatMap((t) => (t.leadId ? [t.leadId] : []))).size,
+  };
 }

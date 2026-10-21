@@ -8,7 +8,7 @@ import { formatDateTime } from "@/lib/dates";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/misc";
-import { RichText } from "@/components/app/rich-text";
+import { ContentBody } from "@/components/app/content-body";
 
 export default async function AnnouncementPage({ params }: { params: Promise<{ id: string }> }) {
   const me = await requirePageUser();
@@ -31,7 +31,7 @@ export default async function AnnouncementPage({ params }: { params: Promise<{ i
           </div>
           <h2 className="font-display text-[26px] font-extrabold tracking-tight text-ink">{a.title}</h2>
           <div className="text-[12.5px] text-muted">{formatDateTime(a.publishAt)} · {a.createdBy.fullName}{a.expiresAt && ` · until ${formatDateTime(a.expiresAt)}`}</div>
-          <RichText text={a.body} />
+          <ContentBody body={a.body} />
           <div className="flex flex-wrap gap-2">
             {a.linkUrl && <a href={a.linkUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-[13px] font-medium text-brand-700 hover:border-brand-300"><ExternalLink className="h-3.5 w-3.5" /> Open link</a>}
             {a.attachment && <a href={`/api/files/${a.attachment.id}`} className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-[13px] font-medium text-brand-700 hover:border-brand-300"><Paperclip className="h-3.5 w-3.5" /> {a.attachment.originalName}</a>}

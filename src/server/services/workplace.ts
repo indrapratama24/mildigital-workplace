@@ -10,6 +10,7 @@ import { audit } from "./audit";
 import { effectiveOn } from "./org";
 import { notify } from "./notifications";
 import { listDirectory } from "./people";
+import { isEmptyContent, sanitizeContent } from "../content";
 
 const requireEditor = (u: CurrentUser) => {
   if (!can(u, "content.manage")) throw forbidden();
@@ -33,11 +34,11 @@ export async function listSections(opts: { includeHidden?: boolean } = {}) {
 export async function saveSection(actor: CurrentUser, input: { id?: string; title: string; body: string; isPublished: boolean; sortOrder: number }) {
   requireEditor(actor);
   if (input.title.trim().length < 2) throw invalid("Section title is required.");
-  if (input.body.length > 20000) throw invalid("Section text is too long (20,000 characters max).");
+  const body = sanitizeContent(input.body);
   return withTx(async (tx) => {
     const before = input.id ? await tx.companyContentSection.findUnique({ where: { id: input.id } }) : null;
     if (input.id && !before) throw notFound("Section");
-    const data = { title: input.title.trim(), body: input.body, isPublished: input.isPublished, sortOrder: input.sortOrder, updatedById: actor.userId };
+    const data = { title: input.title.trim(), body, isPublished: input.isPublished, sortOrder: input.sortOrder, updatedById: actor.userId };
     const saved = input.id
       ? await tx.companyContentSection.update({ where: { id: input.id }, data })
       : await tx.companyContentSection.create({ data: { ...data, key: `custom_${Date.now().toString(36)}` } });
@@ -64,7 +65,7 @@ export interface RegulationInput {
 function validateRegulation(i: RegulationInput) {
   if (i.title.trim().length < 3) throw invalid("Title is required.");
   if (i.category.trim().length < 2) throw invalid("Category is required.");
-  if (i.body.trim().length < 10 && !clean(i.documentUrl) && !i.attachmentId) throw invalid("Add the regulation text, a document link or an attachment.");
+  if (isEmptyContent(i.body) && !clean(i.documentUrl) && !i.attachmentId) throw invalid("Add the regulation text, a document link or an attachment.");
   if (!isValidISO(i.effectiveDate)) throw invalid("Effective date is required.");
   checkUrl(i.documentUrl);
 }
@@ -72,7 +73,7 @@ function validateRegulation(i: RegulationInput) {
 const versionData = (i: RegulationInput) => ({
   title: i.title.trim(),
   summary: clean(i.summary),
-  body: i.body,
+  body: sanitizeContent(i.body),
   effectiveDate: fromISO(i.effectiveDate),
   documentUrl: clean(i.documentUrl),
   attachmentId: i.attachmentId ?? null,
@@ -258,7 +259,7 @@ export interface AnnouncementInput {
 
 function validateAnnouncement(i: AnnouncementInput) {
   if (i.title.trim().length < 3) throw invalid("Title is required.");
-  if (i.body.trim().length < 5) throw invalid("Write the announcement content.");
+  if (isEmptyContent(i.body)) throw invalid("Write the announcement content.");
   if (i.category.trim().length < 2) throw invalid("Category is required.");
   const pub = new Date(i.publishAt);
   if (Number.isNaN(pub.getTime())) throw invalid("Publication date is invalid.");
@@ -286,7 +287,7 @@ export async function saveAnnouncement(actor: CurrentUser, id: string | null, in
     if (id && !before) throw notFound("Announcement");
     const data = {
       title: input.title.trim(),
-      body: input.body,
+      body: sanitizeContent(input.body),
       category: input.category.trim(),
       priority: input.priority,
       status: input.status,

@@ -138,7 +138,7 @@ export async function updateClientRulesAction(input: unknown) {
 export async function saveSectionAction(input: unknown) {
   return runAction(async () => {
     const me = await requireUser();
-    const p = z.object({ id: z.string().optional(), title: z.string().max(120), body: z.string().max(20000), isPublished: z.boolean(), sortOrder: z.number().int().min(0).max(999) }).parse(input);
+    const p = z.object({ id: z.string().optional(), title: z.string().max(120), body: z.string().max(400000), isPublished: z.boolean(), sortOrder: z.number().int().min(0).max(999) }).parse(input);
     await saveSection(me, p);
     refresh();
   }, "Section saved");
@@ -148,7 +148,7 @@ const regulation = z.object({
   title: z.string().max(200),
   category: z.string().max(80),
   summary: optText(500),
-  body: z.string().max(50000),
+  body: z.string().max(400000),
   effectiveDate: date,
   documentUrl: optText(500),
   attachmentId: z.string().nullable().optional(),
@@ -212,7 +212,7 @@ export async function saveAnnouncementAction(id: string | null, input: unknown) 
     const p = z
       .object({
         title: z.string().max(200),
-        body: z.string().max(20000),
+        body: z.string().max(400000),
         category: z.string().max(80),
         priority: z.enum(["NORMAL", "IMPORTANT", "CRITICAL"]),
         publishAt: z.string().min(10),
@@ -312,7 +312,7 @@ export async function uploadContentFileAction(form: FormData) {
     const me = await requirePermission("content.manage");
     const file = form.get("file");
     if (!(file instanceof File)) throw new Error("No file");
-    const f = await saveUpload(me, file, { sensitive: false });
-    return { id: f.id, name: f.originalName };
+    const f = await saveUpload(me, file, { sensitive: false, contentAsset: true });
+    return { id: f.id, name: f.originalName, size: f.size, mimeType: f.mimeType };
   });
 }

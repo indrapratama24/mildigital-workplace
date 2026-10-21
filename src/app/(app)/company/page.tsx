@@ -4,7 +4,8 @@ import { requirePageUser } from "@/server/auth/guard";
 import { announcementsFor, listSections } from "@/server/services/workplace";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/misc";
-import { RichText } from "@/components/app/rich-text";
+import { ContentBody } from "@/components/app/content-body";
+import { isEmptyContent } from "@/server/content";
 import { AnnouncementCard } from "@/components/app/workplace/announcement-card";
 
 export const metadata = { title: "Company Hub" };
@@ -12,7 +13,7 @@ export const metadata = { title: "Company Hub" };
 export default async function CompanyPage() {
   const me = await requirePageUser();
   const [sections, news] = await Promise.all([listSections(), announcementsFor(me.employeeId, { take: 3 })]);
-  const filled = sections.filter((s) => s.body.trim());
+  const filled = sections.filter((s) => !isEmptyContent(s.body));
   return (
     <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
       <aside className="hidden lg:block">
@@ -34,7 +35,7 @@ export default async function CompanyPage() {
           filled.map((s) => (
             <Card key={s.id} id={s.key} className="scroll-mt-24">
               <CardHeader title={s.title} />
-              <CardBody><RichText text={s.body} /></CardBody>
+              <CardBody><ContentBody body={s.body} /></CardBody>
             </Card>
           ))
         )}
