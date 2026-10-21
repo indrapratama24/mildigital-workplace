@@ -19,6 +19,8 @@ export interface AppSettings {
   clientRequirePrimaryConsultant: boolean;
   /** Counting rule: whether Freeze clients are included in "Active clients". */
   clientFreezeCountsAsActive: boolean;
+  /** Leaders highlighted in the Team Directory (ordered); null = not curated yet (team leads are shown). */
+  directoryLeaders: { employeeId: string; caption: string | null }[] | null;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   knowledgeHubUrl: null,
   clientRequirePrimaryConsultant: true,
   clientFreezeCountsAsActive: false,
+  directoryLeaders: null,
 };
 
 export async function getSettings(tx: DbOrTx = db): Promise<AppSettings> {

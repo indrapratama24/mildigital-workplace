@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Cake, Crown, Lock, PlaneTakeoff, Plus, Upload, Users, UsersRound } from "lucide-react";
+import { Cake, Crown, Lock, PlaneTakeoff, Plus, Upload, Users } from "lucide-react";
 import { db } from "@/server/db";
 import { requirePageUser } from "@/server/auth/guard";
 import { can } from "@/server/authz";
@@ -11,32 +11,30 @@ import { Badge } from "@/components/ui/badge";
 import { buttonClass } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
+import { LeadersEditor } from "./leaders-editor";
 
 export const metadata = { title: "Team Directory" };
-
-const STATUS: Record<string, string> = { PERMANENT: "Permanent", CONTRACT: "Contract", PROBATION: "Probation", INTERN: "Intern" };
 
 export default async function DirectoryPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const me = await requirePageUser();
   const sp = await searchParams;
   const today = todayJakarta();
-  const [{ rows, highlights: h, isHR }, hl, teams, levels, leaders, departments, titles] = await Promise.all([
+  const manageLeaders = can(me, "settings.manage");
+  const [{ rows, highlights: h, isHR }, hl, teams, levels, departments, titles, everyone] = await Promise.all([
     listDirectory(me, {
       q: sp.q,
       teamId: sp.team,
       levelId: sp.level,
-      leaderId: sp.leader,
       departmentId: sp.department,
       jobTitle: sp.role,
-      employmentStatus: sp.employment,
       status: (sp.status as "active" | "inactive" | "all") ?? "active",
     }),
     directoryHighlights(7),
     db.team.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
     db.employeeLevel.findMany({ orderBy: { rank: "asc" } }),
-    db.employee.findMany({ where: { isActive: true, directReports: { some: {} } }, select: { id: true, fullName: true }, orderBy: { fullName: "asc" } }),
     db.department.findMany({ orderBy: { name: "asc" } }),
     db.employee.findMany({ where: { isActive: true }, distinct: ["jobTitle"], select: { jobTitle: true }, orderBy: { jobTitle: "asc" } }),
+    manageLeaders ? db.employee.findMany({ where: { isActive: true }, select: { id: true, fullName: true, jobTitle: true }, orderBy: { fullName: "asc" } }) : Promise.resolve([]),
   ]);
   const view = sp.view === "teams" ? "teams" : "list";
   const viewHref = (v: string) => {
@@ -46,7 +44,6 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
     return `/directory?${p.toString()}`;
   };
   const groups = [...rows.reduce((m, r) => m.set(r.team ?? "No team", [...(m.get(r.team ?? "No team") ?? []), r]), new Map<string, typeof rows>())].sort((a, b) => a[0].localeCompare(b[0]));
-  const showEmployment = rows.some((r) => r.employmentStatus !== null);
   const outToday = hl.out.filter((o) => o.now);
   const short = (d: string) => `${formatWeekdayShort(d)}, ${formatDate(d).replace(/ \d{4}$/, "")}`;
   const hidden = <Lock className="h-3 w-3 text-line" aria-label="Hidden by privacy settings or not filled in" />;
@@ -74,39 +71,40 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
         }
       />
 
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Headcount" value={h.headcount} icon={Users} />
-        <Stat label="Teams" value={hl.teams.length} icon={UsersRound} hint={`${new Set(hl.teams.map((t) => t.department)).size} departments`} />
-        <Stat label="Team leads" value={hl.leadCount} icon={Crown} tone="brand" />
-        <Stat label="Out today" value={outToday.length} icon={PlaneTakeoff} tone={outToday.length ? "warning" : "default"} hint="leave or permission" />
+      <div className="mb-5 grid grid-cols-2 gap-3">
+        <Stat label="Team Members" value={h.headcount} icon={Users} hint={`${hl.teams.length} teams`} />
+        <Stat label="Out Today" value={outToday.length} icon={PlaneTakeoff} tone={outToday.length ? "warning" : "default"} hint="on leave or permission" />
       </div>
 
       <div className="mb-5 grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader title={<span className="flex items-center gap-2"><Crown className="h-4 w-4 text-brand-600" /> Team leads</span>} description="Who leads which team" />
-          <CardBody className="grid gap-2 pt-3 sm:grid-cols-2">
-            {hl.teams.map((t) => (
-              <div key={t.id} className="rounded-xl border border-line-2 px-3 py-2.5">
-                <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                  <Link href={`/directory?team=${t.id}`} className="truncate text-[13px] font-semibold text-brand-700 hover:underline">{t.name}</Link>
-                  <span className="shrink-0 text-[11px] text-muted">{t.department} · {t.members} people</span>
-                </div>
-                {t.lead ? (
-                  <Link href={`/directory/${t.lead.id}`} className="flex min-w-0 items-center gap-2.5 hover:text-brand-700">
-                    <Avatar name={t.lead.name} photoId={t.lead.photoId} />
-                    <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-medium text-ink">{t.lead.name}{t.lead.nickname && t.lead.nickname !== t.lead.name.split(" ")[0] && <span className="font-normal text-muted"> ({t.lead.nickname})</span>}</span>
-                      <span className="block truncate text-[11.5px] text-muted">Lead · {t.lead.title}</span>
-                    </span>
-                  </Link>
-                ) : (
-                  <span className="text-[12.5px] text-subtle">No lead assigned</span>
-                )}
-              </div>
-            ))}
-            {hl.teams.length === 0 && <p className="text-[13px] text-muted">No teams yet.</p>}
-          </CardBody>
-        </Card>
+        {(hl.leaders.length > 0 || manageLeaders) && (
+          <Card>
+            <CardHeader
+              title={<span className="flex items-center gap-2"><Crown className="h-4 w-4 text-brand-600" /> Leaders</span>}
+              action={
+                manageLeaders ? (
+                  <LeadersEditor
+                    curated={hl.curated}
+                    initial={hl.leaders.map((l) => ({ employeeId: l.id, caption: hl.curated && l.caption !== l.title ? l.caption : "" }))}
+                    people={everyone.map((e) => ({ id: e.id, name: e.fullName, title: e.jobTitle }))}
+                  />
+                ) : undefined
+              }
+            />
+            <CardBody className="space-y-1 pt-3">
+              {hl.leaders.length === 0 && <p className="text-[13px] text-muted">No leaders highlighted. Use Edit to choose who appears here.</p>}
+              {hl.leaders.map((l) => (
+                <Link key={l.id} href={`/directory/${l.id}`} className="flex items-center gap-2.5 rounded-xl px-2 py-1.5 hover:bg-brand-50">
+                  <Avatar name={l.name} photoId={l.photoId} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium text-ink">{l.name}</span>
+                    <span className="block truncate text-[11.5px] text-muted">{l.caption}</span>
+                  </span>
+                </Link>
+              ))}
+            </CardBody>
+          </Card>
+        )}
         <Card>
           <CardHeader title={<span className="flex items-center gap-2"><PlaneTakeoff className="h-4 w-4 text-leave" /> On leave or permission</span>} description="Today and the next 7 days" />
           <CardBody className="space-y-1 pt-3">
@@ -125,6 +123,23 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
               </Link>
             ))}
             {hl.out.length > 8 && <p className="px-2 text-[12px] text-muted">+{hl.out.length - 8} more</p>}
+          </CardBody>
+        </Card>
+        <Card>
+          <CardHeader title={<span className="flex items-center gap-2"><Cake className="h-4 w-4 text-brand-600" /> Birthdays</span>} description="Next 30 days" />
+          <CardBody className="space-y-1 pt-3">
+            {h.birthdays.length === 0 && <p className="text-[13px] text-muted">No birthdays in the next 30 days (or birthdays are private).</p>}
+            {h.birthdays.slice(0, 8).map((b) => (
+              <Link key={b.id} href={`/directory/${b.id}`} className="flex items-center gap-2.5 rounded-xl px-2 py-1.5 hover:bg-brand-50">
+                <Avatar name={b.name} photoId={b.photoId} className="h-7 w-7 text-[11px]" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-ink">{b.name}</span>
+                  {b.team && <span className="block truncate text-[11.5px] text-muted">{b.team}</span>}
+                </span>
+                <span className={cn("shrink-0 text-[12px] font-medium", b.next === today ? "text-brand-700" : "text-ink-2")}>{b.next === today ? "Today 🎉" : short(b.next)}</span>
+              </Link>
+            ))}
+            {h.birthdays.length > 8 && <p className="px-2 text-[12px] text-muted">+{h.birthdays.length - 8} more</p>}
           </CardBody>
         </Card>
       </div>
@@ -148,16 +163,6 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
             <option value="">All roles</option>
             {titles.map((t) => <option key={t.jobTitle} value={t.jobTitle}>{t.jobTitle}</option>)}
           </Select>
-          <Select name="leader" defaultValue={sp.leader ?? ""} className="h-9 w-auto">
-            <option value="">All leaders</option>
-            {leaders.map((l) => <option key={l.id} value={l.id}>{l.fullName}</option>)}
-          </Select>
-          {showEmployment && (
-            <Select name="employment" defaultValue={sp.employment ?? ""} className="h-9 w-auto">
-              <option value="">All employment types</option>
-              {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </Select>
-          )}
           {isHR && (
             <Select name="status" defaultValue={sp.status ?? "active"} className="h-9 w-auto">
               <option value="active">Active</option>
@@ -167,7 +172,7 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
           )}
           {view === "teams" && <input type="hidden" name="view" value="teams" />}
           <button className={buttonClass("primary", "sm", "h-9")}>Filter</button>
-          {(sp.q || sp.team || sp.level || sp.leader || sp.status || sp.department || sp.role || sp.employment) && <Link href={view === "teams" ? "/directory?view=teams" : "/directory"} className={buttonClass("ghost", "sm", "h-9")}>Reset</Link>}
+          {(sp.q || sp.team || sp.level || sp.status || sp.department || sp.role) && <Link href={view === "teams" ? "/directory?view=teams" : "/directory"} className={buttonClass("ghost", "sm", "h-9")}>Reset</Link>}
           <span className="ml-auto flex items-center gap-1 rounded-full border border-line bg-white p-1 text-[12.5px]">
             <Link href={viewHref("list")} className={cn("rounded-full px-3 py-1 font-medium", view === "list" ? "bg-brand-700 text-white" : "text-ink-2 hover:text-brand-700")}>List</Link>
             <Link href={viewHref("teams")} className={cn("rounded-full px-3 py-1 font-medium", view === "teams" ? "bg-brand-700 text-white" : "text-ink-2 hover:text-brand-700")}>By team</Link>

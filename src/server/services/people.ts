@@ -10,6 +10,7 @@ import { conflict, forbidden, invalid, notFound } from "../errors";
 import { blindIndex, decrypt, encrypt, last4, mask } from "../crypto";
 import { audit } from "./audit";
 import { effectiveOn } from "./org";
+import { getSettings, updateSettings } from "./settings";
 import { addDays, formatDate, fromISO, isValidISO, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 
 // ───────────────────────────── Field visibility ─────────────────────────────
@@ -499,7 +500,7 @@ export async function setProfilePhoto(actor: CurrentUser, employeeId: string, fi
 export async function directoryHighlights(days = 7) {
   const today = todayJakarta();
   const until = addDays(today, days);
-  const [teams, out] = await Promise.all([
+  const [teams, settings, out] = await Promise.all([
     db.team.findMany({
       where: { isActive: true },
       include: {
@@ -509,6 +510,7 @@ export async function directoryHighlights(days = 7) {
       },
       orderBy: { name: "asc" },
     }),
+    getSettings(),
     db.request.findMany({
       where: {
         status: "APPROVED",
@@ -550,5 +552,38 @@ export async function directoryHighlights(days = 7) {
       };
     }),
     leadCount: new Set(teams.flatMap((t) => (t.leadId ? [t.leadId] : []))).size,
+    ...(await highlightedLeaders(settings.directoryLeaders, teams)),
   };
+}
+
+type TeamWithLead = { name: string; lead: { id: string; fullName: string; nickname: string | null; jobTitle: string; photoId: string | null; isActive: boolean } | null };
+
+/** Curated leaders (Super Admin's choice and order); until curated, every team lead is shown. */
+async function highlightedLeaders(curated: { employeeId: string; caption: string | null }[] | null, teams: TeamWithLead[]) {
+  const ledTeams = (id: string) => teams.filter((t) => t.lead?.id === id).map((t) => t.name);
+  const defaultCaption = (id: string, title: string) => (ledTeams(id).length ? `Leads ${ledTeams(id).join(" & ")}` : title);
+  if (!curated) {
+    const seen = new Set<string>();
+    const leaders = teams.flatMap((t) => (t.lead && t.lead.isActive && !seen.has(t.lead.id) && seen.add(t.lead.id) ? [t.lead] : []));
+    return { curated: false, leaders: leaders.map((l) => ({ id: l.id, name: l.fullName, nickname: l.nickname, title: l.jobTitle, photoId: l.photoId, caption: defaultCaption(l.id, l.jobTitle) })) };
+  }
+  const people = await db.employee.findMany({ where: { id: { in: curated.map((c) => c.employeeId) }, isActive: true }, select: { id: true, fullName: true, nickname: true, jobTitle: true, photoId: true } });
+  return {
+    curated: true,
+    leaders: curated.flatMap((c) => {
+      const p = people.find((x) => x.id === c.employeeId);
+      return p ? [{ id: p.id, name: p.fullName, nickname: p.nickname, title: p.jobTitle, photoId: p.photoId, caption: c.caption || defaultCaption(p.id, p.jobTitle) }] : [];
+    }),
+  };
+}
+
+/** Super Admin: choose and order the leaders highlighted in the directory. */
+export async function setDirectoryLeaders(actor: CurrentUser, list: { employeeId: string; caption: string | null }[]) {
+  if (!can(actor, "settings.manage")) throw forbidden();
+  const ids = list.map((l) => l.employeeId);
+  if (new Set(ids).size !== ids.length) throw invalid("Each person can only be highlighted once.");
+  if (list.length > 24) throw invalid("Highlight at most 24 leaders.");
+  const found = await db.employee.count({ where: { id: { in: ids }, isActive: true } });
+  if (found !== ids.length) throw invalid("Choose active employees from the directory.");
+  await updateSettings(actor, { directoryLeaders: list.map((l) => ({ employeeId: l.employeeId, caption: l.caption?.trim().slice(0, 80) || null })) });
 }

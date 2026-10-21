@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db";
 import { DomainError } from "@/server/errors";
-import { directoryHighlights, getProfile, listDirectory, ptkp, revealSensitive, setVisibility, tenure, updatePersonalData } from "@/server/services/people";
+import { directoryHighlights, getProfile, setDirectoryLeaders, listDirectory, ptkp, revealSensitive, setVisibility, tenure, updatePersonalData } from "@/server/services/people";
 import { fromISO } from "@/lib/dates";
 import { buildOrg, resetDb, type Org } from "./helpers";
 
@@ -154,5 +154,21 @@ describe("Directory highlights & nickname", () => {
     expect(hl.out[0]).toMatchObject({ kind: "Leave", now: true, end: "2026-11-04", employee: { id: org.ids.junior } });
     expect(JSON.stringify(hl.out)).not.toContain("Sick");
     expect(JSON.stringify(hl.out)).not.toContain("Family");
+  });
+
+  it("Super Admin curates which leaders are highlighted, in order", async () => {
+    const team = await db.team.findFirstOrThrow({ where: { name: { not: "Creative Studio" } } });
+    await db.team.update({ where: { id: team.id }, data: { leadId: org.ids.leader } });
+    const before = await directoryHighlights();
+    expect(before.curated).toBe(false);
+    expect(before.leaders.map((l) => l.id)).toEqual([org.ids.leader]);
+    expect(before.leaders[0].caption).toMatch(/^Leads /);
+
+    await expectError(setDirectoryLeaders(await org.actor("hr"), [{ employeeId: org.ids.leader2, caption: null }]), "FORBIDDEN");
+    await expectError(setDirectoryLeaders(await org.actor("admin"), [{ employeeId: org.ids.leader2, caption: null }, { employeeId: org.ids.leader2, caption: null }]), "VALIDATION");
+    await setDirectoryLeaders(await org.actor("admin"), [{ employeeId: org.ids.leader2, caption: "Head of Growth" }, { employeeId: org.ids.leader, caption: null }]);
+    const after = await directoryHighlights();
+    expect(after.curated).toBe(true);
+    expect(after.leaders.map((l) => [l.id, l.caption])).toEqual([[org.ids.leader2, "Head of Growth"], [org.ids.leader, `Leads ${team.name}`]]);
   });
 });

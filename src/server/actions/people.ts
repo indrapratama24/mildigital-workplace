@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "../auth/guard";
 import { runAction } from "../errors";
-import { revealSensitive, setVisibility, updatePersonalData } from "../services/people";
+import { revealSensitive, setDirectoryLeaders, setVisibility, updatePersonalData } from "../services/people";
 
 const opt = z.string().max(500).nullable().optional();
 
@@ -51,4 +51,13 @@ export async function setDirectoryVisibilityAction(input: unknown) {
     await setVisibility(me, z.record(z.string(), aud).parse(input) as never);
     revalidatePath("/", "layout");
   }, "Directory visibility saved");
+}
+
+export async function setDirectoryLeadersAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    const list = z.array(z.object({ employeeId: z.string(), caption: z.string().max(80).nullable() })).max(24).parse(input);
+    await setDirectoryLeaders(me, list);
+    revalidatePath("/directory");
+  }, "Highlighted leaders saved");
 }
