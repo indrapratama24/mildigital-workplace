@@ -26,10 +26,10 @@ export default async function RequestTypesPage() {
                 <td className="tabular">{t.reasonMinLength}</td>
                 <td className="tabular">{t.advanceNoticeDays}d</td>
                 <td>{t.allowHalfDay ? "½" : "—"} / {t.allowHourly ? "hourly" : "—"}</td>
-                <td>{t.deductsBalance ? `${t.defaultEntitlement ?? 0}d/yr` : "—"}</td>
+                <td>{t.deductsBalance ? `${t.defaultEntitlement ?? 0}d/yr${t.monthlyAccrual ? " · monthly" : ""}${t.eligibleStatuses.length ? ` · ${t.eligibleStatuses.map((x) => x.toLowerCase()).join("/")}` : ""}` : "—"}</td>
                 <td>{t.isSensitive ? <Badge tone="warning">Yes</Badge> : "—"}</td>
                 <td className="text-right">
-                  <RequestTypeDialog initial={{ id: t.id, code: t.code, name: t.name, category: t.category, description: t.description ?? "", documentRequirement: t.documentRequirement, delegation: t.delegation, reasonMinLength: t.reasonMinLength, advanceNoticeDays: t.advanceNoticeDays, allowHalfDay: t.allowHalfDay, allowHourly: t.allowHourly, deductsBalance: t.deductsBalance, defaultEntitlement: t.defaultEntitlement, isSensitive: t.isSensitive, isActive: t.isActive }} />
+                  <RequestTypeDialog initial={{ id: t.id, code: t.code, name: t.name, category: t.category, description: t.description ?? "", documentRequirement: t.documentRequirement, delegation: t.delegation, reasonMinLength: t.reasonMinLength, advanceNoticeDays: t.advanceNoticeDays, allowHalfDay: t.allowHalfDay, allowHourly: t.allowHourly, deductsBalance: t.deductsBalance, defaultEntitlement: t.defaultEntitlement, monthlyAccrual: t.monthlyAccrual, eligibleStatuses: t.eligibleStatuses, annualRules: t.annualRules, isSensitive: t.isSensitive, isActive: t.isActive }} />
                 </td>
               </tr>
             ))}

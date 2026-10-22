@@ -64,7 +64,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <CardHeader title="Overview" />
             <CardBody className="space-y-4">
               <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px] sm:grid-cols-3">
-                <KV k="Industry" v={c.industry ?? "—"} />
+                <KV k="Category" v={c.category ?? "—"} />
+                <KV k="Industry" v={c.industry ? `${c.industry}${c.subIndustry ? ` · ${c.subIndustry}` : ""}` : "—"} />
+                <KV k="Ad accounts" v={c.adAccounts.length ? c.adAccounts.join(", ") : "—"} />
                 <KV k="Date START" v={formatDate(c.dateStart)} />
                 <KV k="Date OFF" v={c.dateOff ? formatDate(c.dateOff) : "—"} />
                 <KV k="Collaboration period" v={<b className="font-display text-[17px] text-brand-700">{c.period.label}</b>} />
@@ -163,7 +165,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               {c.sensitiveVisible ? (
                 <>
                   <KV k="Client PIC" v={c.picName ?? "—"} />
-                  <KV k="PIC contact" v={c.picContact ?? "—"} />
+                  <KV k="PIC phone" v={c.picPhone ? <a href={`tel:${c.picPhone.replace(/[\s()-]/g, "")}`} className="text-brand-700 hover:underline">{c.picPhone}</a> : "—"} />
+                  <KV k="PIC email" v={c.picEmail ? <a href={`mailto:${c.picEmail}`} className="text-brand-700 hover:underline">{c.picEmail}</a> : "—"} />
                   <div>
                     <div className="text-[11.5px] text-muted">Internal notes</div>
                     <p className="mt-0.5 whitespace-pre-line text-ink">{c.internalNotes ?? "—"}</p>

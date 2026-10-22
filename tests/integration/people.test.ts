@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db";
 import { DomainError } from "@/server/errors";
+import { leaveBalance } from "@/server/services/requests";
 import { directoryHighlights, getProfile, setDirectoryLeaders, listDirectory, ptkp, revealSensitive, setVisibility, tenure, updatePersonalData } from "@/server/services/people";
 import { fromISO } from "@/lib/dates";
 import { buildOrg, resetDb, type Org } from "./helpers";
@@ -170,5 +171,22 @@ describe("Directory highlights & nickname", () => {
     const after = await directoryHighlights();
     expect(after.curated).toBe(true);
     expect(after.leaders.map((l) => [l.id, l.caption])).toEqual([[org.ids.leader2, "Head of Growth"], [org.ids.leader, `Leads ${team.name}`]]);
+  });
+});
+
+describe("Annual leave accrual", () => {
+  it("is earned monthly from the full-time date and counted at the leave date", async () => {
+    await db.requestType.update({ where: { id: org.types.ANNUAL }, data: { monthlyAccrual: true, eligibleStatuses: ["PERMANENT"], defaultEntitlement: 12 } });
+    await db.employee.update({ where: { id: org.ids.junior }, data: { employmentStatus: "PERMANENT", fullTimeSince: fromISO("2026-10-15") } });
+    const oct = await leaveBalance(db, org.ids.junior, org.types.ANNUAL, 2026, undefined, "2026-10-28");
+    const dec = await leaveBalance(db, org.ids.junior, org.types.ANNUAL, 2026, undefined, "2026-12-08");
+    expect([oct?.entitled, dec?.entitled]).toEqual([1, 3]);
+    await db.request.create({ data: { employeeId: org.ids.junior, requestTypeId: org.types.ANNUAL, status: "APPROVED", startDate: fromISO("2026-11-05"), endDate: fromISO("2026-11-06"), workingDays: 2, reason: "Family trip", idempotencyKey: "a" } });
+    expect((await leaveBalance(db, org.ids.junior, org.types.ANNUAL, 2026, undefined, "2026-12-08"))?.remaining).toBe(1);
+
+    // Contract staff aren't eligible: nothing is earned (only manual adjustments count)
+    await db.employee.update({ where: { id: org.ids.peer }, data: { employmentStatus: "CONTRACT", fullTimeSince: fromISO("2025-01-01") } });
+    const contract = await leaveBalance(db, org.ids.peer, org.types.ANNUAL, 2026, undefined, "2026-12-08");
+    expect([contract?.eligible, contract?.entitled]).toEqual([false, 0]);
   });
 });

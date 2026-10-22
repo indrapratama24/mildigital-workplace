@@ -119,7 +119,7 @@ export async function createReferenceData(db: PrismaClient, opts: { demoPolicyHi
   const types: Record<string, string> = {};
   for (const [i, t] of RT.entries()) {
     const row = await db.requestType.create({
-      data: { code: t.code, name: t.name, category: t.category, description: t.desc, documentRequirement: t.doc, delegation: t.del, reasonMinLength: t.min, advanceNoticeDays: t.notice, allowHalfDay: t.half, allowHourly: t.hourly, deductsBalance: t.bal, defaultEntitlement: t.ent, isSensitive: t.sensitive, sortOrder: i },
+      data: { code: t.code, name: t.name, category: t.category, description: t.desc, documentRequirement: t.doc, delegation: t.del, reasonMinLength: t.min, advanceNoticeDays: t.notice, allowHalfDay: t.half, allowHourly: t.hourly, deductsBalance: t.bal, defaultEntitlement: t.ent, isSensitive: t.sensitive, sortOrder: i, ...(t.code === "ANNUAL" ? { monthlyAccrual: true, eligibleStatuses: ["PERMANENT" as const], annualRules: true, advanceNoticeDays: 14 } : {}) },
     });
     types[t.code] = row.id;
   }

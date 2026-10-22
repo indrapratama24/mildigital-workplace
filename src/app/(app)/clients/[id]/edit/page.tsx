@@ -42,13 +42,17 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
           adsStrategists: c.adsStrategists.map((p) => p.id),
           waivePrimary: c.primaryConsultantWaived,
           waiverReason: c.waiverReason ?? "",
-          industry: c.industry ?? "",
+          categoryId: c.categoryId ?? "",
+          industryName: c.industry ?? "",
+          subIndustryName: c.subIndustry ?? "",
+          adAccounts: c.adAccounts,
           description: c.description ?? "",
           websiteUrl: c.websiteUrl ?? "",
           instagramUrl: c.instagramUrl ?? "",
           tiktokUrl: c.tiktokUrl ?? "",
           picName: c.picName ?? "",
-          picContact: c.picContact ?? "",
+          picPhone: c.picPhone ?? "",
+          picEmail: c.picEmail ?? "",
           internalNotes: c.internalNotes ?? "",
         }}
         packages={packages}
@@ -58,7 +62,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
         canChangeCode={can(me, "settings.manage")}
         canEditSensitive={c.sensitiveVisible}
         statusFrom={openStatus?.from}
-        industries={opts.industries}
+        taxonomy={{ categories: opts.categories, industries: opts.industries, adAccounts: opts.adAccounts }}
       />
     </>
   );

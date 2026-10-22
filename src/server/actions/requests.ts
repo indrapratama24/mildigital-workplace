@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "../auth/guard";
 import { runAction } from "../errors";
-import { cancelRequest, computeRequestImpact, saveRequestDraft, submitRequest } from "../services/requests";
+import { cancelRequest, computeRequestImpact, saveRequestDraft, setYearEndChoice, submitRequest } from "../services/requests";
 import { saveUpload } from "../services/files";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -76,4 +76,13 @@ export async function uploadAction(form: FormData) {
     const f = await saveUpload(me, file, { sensitive: form.get("sensitive") === "true" });
     return { id: f.id, name: f.originalName, size: f.size };
   });
+}
+
+export async function setYearEndChoiceAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    const p = z.object({ option: z.enum(["CASH", "CARRY"]), days: z.number().min(0.5).max(60) }).parse(input);
+    await setYearEndChoice(me, p);
+    revalidatePath("/", "layout");
+  }, "Year-end choice saved");
 }

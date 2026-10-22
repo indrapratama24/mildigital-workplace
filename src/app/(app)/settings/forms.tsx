@@ -346,12 +346,15 @@ export interface RequestTypeDTO {
   allowHourly: boolean;
   deductsBalance: boolean;
   defaultEntitlement: number | null;
+  monthlyAccrual: boolean;
+  eligibleStatuses: ("PERMANENT" | "CONTRACT" | "PROBATION" | "INTERN")[];
+  annualRules: boolean;
   isSensitive: boolean;
   isActive: boolean;
 }
 
 export function RequestTypeDialog({ initial }: { initial?: RequestTypeDTO }) {
-  const blank: RequestTypeDTO = { code: "", name: "", category: "PERMISSION", description: "", documentRequirement: "NONE", delegation: "OPTIONAL", reasonMinLength: 10, advanceNoticeDays: 0, allowHalfDay: true, allowHourly: false, deductsBalance: false, defaultEntitlement: null, isSensitive: false, isActive: true };
+  const blank: RequestTypeDTO = { code: "", name: "", category: "PERMISSION", description: "", documentRequirement: "NONE", delegation: "OPTIONAL", reasonMinLength: 10, advanceNoticeDays: 0, allowHalfDay: true, allowHourly: false, deductsBalance: false, defaultEntitlement: null, monthlyAccrual: false, eligibleStatuses: [], annualRules: false, isSensitive: false, isActive: true };
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<RequestTypeDTO>(initial ?? blank);
   const { pending, run } = useRun();
@@ -385,6 +388,20 @@ export function RequestTypeDialog({ initial }: { initial?: RequestTypeDTO }) {
           <Checkbox checked={f.allowHalfDay} onChange={(e) => set("allowHalfDay", e.target.checked)} label="Allow half days" />
           <Checkbox checked={f.allowHourly} onChange={(e) => set("allowHourly", e.target.checked)} label="Allow hourly" />
           <Checkbox checked={f.deductsBalance} onChange={(e) => set("deductsBalance", e.target.checked)} label="Deducts leave balance" />
+          {f.deductsBalance && (
+            <>
+              <Checkbox checked={f.annualRules} onChange={(e) => set("annualRules", e.target.checked)} label="Annual leave rules" description="Usage tiers, max days off, max % on leave at once and the year-end choice (Settings → Leave rules)." />
+              <Checkbox checked={f.monthlyAccrual} onChange={(e) => set("monthlyAccrual", e.target.checked)} label="Earned monthly" description="Entitlement ÷ 12 per month from the month the employee became eligible (full-time since). The balance is counted at the leave date." />
+              <div className="sm:col-span-2">
+                <div className="mb-1 text-[13px] font-medium text-ink-2">Eligible employment status <span className="font-normal text-muted">(none ticked = everyone)</span></div>
+                <div className="flex flex-wrap gap-3">
+                  {(["PERMANENT", "CONTRACT", "PROBATION", "INTERN"] as const).map((st) => (
+                    <Checkbox key={st} checked={f.eligibleStatuses.includes(st)} onChange={(e) => set("eligibleStatuses", e.target.checked ? [...f.eligibleStatuses, st] : f.eligibleStatuses.filter((x) => x !== st))} label={st.charAt(0) + st.slice(1).toLowerCase()} />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
           <Checkbox checked={f.isSensitive} onChange={(e) => set("isSensitive", e.target.checked)} label="Sensitive (medical/private)" description="Documents visible only to approvers and HR." />
           <Checkbox checked={f.isActive} onChange={(e) => set("isActive", e.target.checked)} label="Active" />
         </div>
@@ -534,5 +551,83 @@ export function RestorePolicyButton({ id }: { id: string }) {
     <Button size="sm" variant="secondary" loading={pending} onClick={() => run(() => A.restorePolicyAction(id))}>
       Restore
     </Button>
+  );
+}
+
+// ───────────── Leave rules & final approval ─────────────
+
+type LeaveRules = { tier1MaxDays: number; tier2MaxDays: number; tier2GapDays: number; laterMaxDays: number; maxOffDays: number; maxConcurrentPercent: number };
+type YearEnd = { enabled: boolean; maxDays: number; windowDays: number; carryUntilMonth: number };
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+export function LeaveRulesForm({ initial }: { initial: { annualLeaveRules: LeaveRules; leaveYearEnd: YearEnd } }) {
+  const [r, setR] = useState(initial.annualLeaveRules);
+  const [y, setY] = useState(initial.leaveYearEnd);
+  const { pending, run } = useRun();
+  const num = (label: string, value: number, onChange: (v: number) => void, hint?: string, step = 1) => (
+    <Field label={label} hint={hint}><Input type="number" step={step} min={0} value={value} onChange={(e) => onChange(Number(e.target.value))} /></Field>
+  );
+  return (
+    <div className="space-y-6">
+      <div>
+        <h4 className="mb-2 text-[13.5px] font-semibold text-ink">Usage tiers (per year)</h4>
+        <div className="grid gap-3 sm:grid-cols-4">
+          {num("Tier 1 · max days", r.tier1MaxDays, (v) => setR({ ...r, tier1MaxDays: v }), "One leave per year up to this many days.")}
+          {num("Tier 2 · max days", r.tier2MaxDays, (v) => setR({ ...r, tier2MaxDays: v }), "One more leave up to this many days.")}
+          {num("Tier 2 · gap (days)", r.tier2GapDays, (v) => setR({ ...r, tier2GapDays: v }), "Minimum days between the two longer leaves.")}
+          {num("Tier 3 · max days", r.laterMaxDays, (v) => setR({ ...r, laterMaxDays: v }), "After that, per request.", 0.5)}
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-4">
+        {num("Max days off in a row", r.maxOffDays, (v) => setR({ ...r, maxOffDays: v }), "Calendar days, incl. adjoining public holidays.")}
+        {num("Max on leave at once (%)", r.maxConcurrentPercent, (v) => setR({ ...r, maxConcurrentPercent: v }), "Share of all active employees on the same date.")}
+      </div>
+      <div className="border-t border-line-2 pt-5">
+        <h4 className="mb-2 text-[13.5px] font-semibold text-ink">Year-end leftover (cash or carry-over)</h4>
+        <Checkbox checked={y.enabled} onChange={(e) => setY({ ...y, enabled: e.target.checked })} label="Let employees trade leftover annual leave at year end" />
+        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+          {num("Max days tradable", y.maxDays, (v) => setY({ ...y, maxDays: v }), "Cash or carried over.", 0.5)}
+          {num("Choice opens (days before 31 Dec)", y.windowDays, (v) => setY({ ...y, windowDays: v }), "e.g. 30 = from 1 December.")}
+          <Field label="Carried days usable until" hint="End of this month next year; unused carried days expire.">
+            <Select value={y.carryUntilMonth} onChange={(e) => setY({ ...y, carryUntilMonth: Number(e.target.value) })}>
+              {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </Select>
+          </Field>
+        </div>
+      </div>
+      <Button loading={pending} onClick={() => run(() => A.updateLeaveRulesAction({ annualLeaveRules: r, leaveYearEnd: y }))}>Save leave rules</Button>
+    </div>
+  );
+}
+
+export function FinalApprovalForm({ initial, approvers, types }: { initial: { finalApproverEmployeeId: string | null; finalApprovalRequestTypes: string[] }; approvers: { id: string; name: string }[]; types: { id: string; name: string; category: string }[] }) {
+  const [f, setF] = useState(initial);
+  const { pending, run } = useRun();
+  return (
+    <div className="space-y-4">
+      <Field label="Final approver (after the leader)" hint="Leave empty to switch the final approval off. Skipped when the approver is the requester or already their leader.">
+        <Select value={f.finalApproverEmployeeId ?? ""} onChange={(e) => setF({ ...f, finalApproverEmployeeId: e.target.value || null })} className="max-w-sm">
+          <option value="">No final approval</option>
+          {approvers.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </Select>
+      </Field>
+      <div>
+        <div className="mb-1.5 text-[13px] font-medium text-ink-2">Applies to</div>
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {types.map((t) => (
+            <Checkbox
+              key={t.id}
+              checked={f.finalApprovalRequestTypes.includes(t.id)}
+              disabled={!f.finalApproverEmployeeId}
+              onChange={(e) => setF({ ...f, finalApprovalRequestTypes: e.target.checked ? [...f.finalApprovalRequestTypes, t.id] : f.finalApprovalRequestTypes.filter((x) => x !== t.id) })}
+              label={t.name}
+              description={t.category.toLowerCase().replace("_", " ")}
+            />
+          ))}
+        </div>
+      </div>
+      <p className="text-[12px] text-muted">Applies to requests submitted from now on; requests already in progress keep their steps.</p>
+      <Button loading={pending} onClick={() => run(() => A.updateFinalApprovalAction(f))}>Save final approval</Button>
+    </div>
   );
 }

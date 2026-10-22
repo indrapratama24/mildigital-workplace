@@ -18,6 +18,7 @@ import { clientsForEmployee } from "@/server/services/clients";
 import { CLIENT_ROLE_LABEL, CLIENT_STATUS_LABEL } from "@/lib/engine/clients";
 import { STATUS_TONE } from "@/components/app/clients/status";
 import { PhotoControl } from "@/components/app/workplace/photo-control";
+import { ResetPasswordButton } from "../reset-password";
 import { ActiveToggle, BalanceForm, ChangeLevelForm, EditEmployeeForm, LeaderForm, PolicyOverrideForm } from "../employee-forms";
 
 export const metadata = { title: "Employee" };
@@ -82,6 +83,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             {!e.isActive && <Badge tone="danger">Inactive</Badge>}
             {canSeeWork && <Badge tone="brand">{e.user ? ROLE_LABELS[e.user.role] : "No account"}</Badge>}
             {canSeeWork && <Link href={`/calendar?employee=${e.id}`} className={buttonClass("secondary", "sm")}>View work calendar</Link>}
+            {can(me, "user.manage") && e.user && e.id !== me.employeeId && <ResetPasswordButton employeeId={e.id} name={e.fullName} />}
             {manage && <ActiveToggle id={e.id} active={e.isActive} name={e.fullName} />}
           </>
         }
@@ -144,7 +146,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
             <CardBody>
               <EditEmployeeForm
                 id={e.id}
-                initial={{ fullName: e.fullName, jobTitle: e.jobTitle, employmentStatus: e.employmentStatus, departmentId: e.departmentId ?? "", teamId: currentTeam?.teamId ?? "", role: e.user?.role ?? "EMPLOYEE", levelId: currentLevel?.levelId ?? "", roleDescription: e.roleDescription ?? "" }}
+                initial={{ fullName: e.fullName, jobTitle: e.jobTitle, employmentStatus: e.employmentStatus, departmentId: e.departmentId ?? "", teamId: currentTeam?.teamId ?? "", role: e.user?.role ?? "EMPLOYEE", levelId: currentLevel?.levelId ?? "", roleDescription: e.roleDescription ?? "", fullTimeSince: e.fullTimeSince ? toISO(e.fullTimeSince) : "" }}
                 departments={departments.map((d) => ({ id: d.id, name: d.name }))}
                 teams={teams.map((t) => ({ id: t.id, name: t.name }))}
                 levels={levels.map((l) => ({ id: l.id, name: l.name }))}

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/session";
 import { can } from "@/server/authz";
-import { clientsCsv, listClients, type ClientFilters } from "@/server/services/clients";
+import { clientsExportCsv, listClients, type ClientFilters } from "@/server/services/clients";
 import { audit } from "@/server/services/audit";
 import { db } from "@/server/db";
 import { todayJakarta } from "@/lib/dates";
@@ -17,12 +17,14 @@ export async function GET(req: Request) {
     packageId: sp.get("package") || undefined,
     consultantId: sp.get("consultant") || undefined,
     asId: sp.get("as") || undefined,
-    industry: sp.get("industry") || undefined,
+    categoryId: sp.get("category") || undefined,
+    industryId: sp.get("industry") || undefined,
+    adAccountId: sp.get("ad") || undefined,
     sort: (sp.get("sort") as ClientFilters["sort"]) || "name",
   };
   const { all } = await listClients(me, filters);
   await audit(db, { actorUserId: me.userId, action: "client.export", entityType: "ClientBrand", entityId: "directory", metadata: { filters, rows: all.length } });
-  return new NextResponse("﻿" + clientsCsv(all), {
+  return new NextResponse("﻿" + (await clientsExportCsv(me, all)), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="mil-clients-${todayJakarta()}.csv"`,

@@ -1,8 +1,10 @@
 // Leave & permission requests with optional peer delegation and two-layer approval
 // (Layer 1: delegate accepts coverage; Layer 2: leader approves entitlement).
+import { accruedEntitlement, checkTiers, concurrencyCap, offStretch, unpaidDays } from "@/lib/engine/leave";
+import { isHolidayEffective } from "@/lib/engine/working-days";
 import type { ApprovalStep, ApprovalWorkflow, DurationType, Prisma, Request, RequestStatus } from "@prisma/client";
 import { db, withTx, type DbOrTx, type Tx } from "../db";
-import { addMonths, eachDate, formatDate, formatDateRange, fromISO, isValidISO, monthEnd, monthStart, todayJakarta, toISO, type ISODate } from "@/lib/dates";
+import { addDays as addDaysISO, addMonths, eachDate, formatDate, formatDateRange, fromISO, isoWeekday as isoWeekdayOf, isValidISO, monthEnd, monthStart, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { evaluatePlan, type LeaveDay } from "@/lib/engine/working-days";
 import type { CurrentUser } from "../auth/session";
 import { can, hasCompanyScope } from "../authz";
@@ -69,17 +71,142 @@ export async function findConflicts(tx: DbOrTx, employeeId: string, input: Pick<
   return overlapping.filter((r) => !(toISO(r.startDate) === toISO(r.endDate) && input.startDate === input.endDate && compatible(input, r)));
 }
 
-export async function leaveBalance(tx: DbOrTx, employeeId: string, requestTypeId: string, year: number, excludeRequestId?: string) {
+/**
+ * Balance of a balance-deducting leave type for one calendar year, evaluated at `asOf` (the leave date
+ * when checking a request). Monthly-accrual types only count what has been earned by then; types limited
+ * to certain employment statuses give ineligible employees no entitlement (only manual adjustments).
+ */
+export async function leaveBalance(tx: DbOrTx, employeeId: string, requestTypeId: string, year: number, excludeRequestId?: string, asOf?: ISODate) {
   const type = await tx.requestType.findUniqueOrThrow({ where: { id: requestTypeId } });
   if (!type.deductsBalance) return null;
-  const bal = await tx.leaveBalance.findUnique({ where: { employeeId_requestTypeId_year: { employeeId, requestTypeId, year } } });
-  const entitled = (bal?.entitledDays ?? type.defaultEntitlement ?? 0) + (bal?.adjustedDays ?? 0);
+  const [bal, emp] = await Promise.all([
+    tx.leaveBalance.findUnique({ where: { employeeId_requestTypeId_year: { employeeId, requestTypeId, year } } }),
+    tx.employee.findUniqueOrThrow({ where: { id: employeeId }, select: { employmentStatus: true, startDate: true, fullTimeSince: true } }),
+  ]);
+  const today = todayJakarta();
+  const at = asOf ?? (String(year) === today.slice(0, 4) ? today : String(year) < today.slice(0, 4) ? `${year}-12-31` : `${year}-01-01`);
+  const yearly = bal?.entitledDays ?? type.defaultEntitlement ?? 0;
+  const eligible = !type.eligibleStatuses.length || type.eligibleStatuses.includes(emp.employmentStatus);
+  const eligibleSince = type.eligibleStatuses.length ? (emp.fullTimeSince ? toISO(emp.fullTimeSince) : null) : toISO(emp.fullTimeSince ?? emp.startDate);
+  const earned = !eligible ? 0 : type.monthlyAccrual ? accruedEntitlement({ yearly, year, eligibleSince, asOf: at }) : yearly;
+  const entitled = earned + (bal?.adjustedDays ?? 0);
   const rows = await tx.request.findMany({
     where: { employeeId, requestTypeId, id: excludeRequestId ? { not: excludeRequestId } : undefined, status: { in: ACTIVE_STATUSES }, startDate: { gte: fromISO(`${year}-01-01`), lte: fromISO(`${year}-12-31`) } },
   });
   const used = rows.filter((r) => r.status === "APPROVED").reduce((s, r) => s + r.workingDays, 0);
   const pending = rows.filter((r) => r.status !== "APPROVED").reduce((s, r) => s + r.workingDays, 0);
-  return { entitled, used, pending, remaining: entitled - used - pending };
+  // Leftover carried from last year (year-end choice): usable for leave starting by the cut-off month;
+  // afterwards only the part already used counts, the rest expires.
+  let carryIn = 0;
+  let carryUntil: ISODate | null = null;
+  if (type.annualRules) {
+    const choice = await tx.leaveYearEndChoice.findUnique({ where: { employeeId_requestTypeId_year: { employeeId, requestTypeId, year: year - 1 } } });
+    if (choice?.option === "CARRY") {
+      const s = await getSettings(tx);
+      const prev = await leaveBalance(tx, employeeId, requestTypeId, year - 1, undefined, `${year - 1}-12-31`);
+      const carry = Math.min(choice.days, Math.max(0, prev?.remaining ?? 0), s.leaveYearEnd.maxDays);
+      carryUntil = monthEnd(year, s.leaveYearEnd.carryUntilMonth);
+      const usedByCutoff = rows.filter((r) => toISO(r.startDate) <= carryUntil!).reduce((sum, r) => sum + r.workingDays, 0);
+      carryIn = at <= carryUntil ? carry : Math.min(carry, usedByCutoff);
+    }
+  }
+  const total = entitled + carryIn;
+  return { entitled: total, earned, carryIn, carryUntil, yearly, monthlyAccrual: type.monthlyAccrual, eligible, eligibleSince, asOf: at, used, pending, remaining: total - used - pending };
+}
+
+// ───────────────────────────── Year-end leftover ─────────────────────────────
+
+/** The year-end cash / carry-over window for the employee's annual leave (null when not applicable). */
+export async function yearEndStatus(employeeId: string, now: ISODate = todayJakarta()) {
+  const settings = await getSettings();
+  const cfg = settings.leaveYearEnd;
+  if (!cfg.enabled) return null;
+  const type = await db.requestType.findFirst({ where: { annualRules: true, isActive: true, deductsBalance: true }, orderBy: { sortOrder: "asc" } });
+  if (!type) return null;
+  const year = Number(now.slice(0, 4));
+  const yearEnd = `${year}-12-31`;
+  const opensOn = addDaysISO(yearEnd, -cfg.windowDays);
+  const bal = await leaveBalance(db, employeeId, type.id, year, undefined, yearEnd);
+  if (!bal?.eligible && !bal?.entitled) return null;
+  const choice = await db.leaveYearEndChoice.findUnique({ where: { employeeId_requestTypeId_year: { employeeId, requestTypeId: type.id, year } } });
+  return {
+    type: { id: type.id, name: type.name },
+    year,
+    opensOn,
+    closesOn: yearEnd,
+    open: now >= opensOn && now <= yearEnd,
+    projectedRemaining: bal.remaining,
+    tradable: Math.min(cfg.maxDays, Math.max(0, bal.remaining)),
+    maxDays: cfg.maxDays,
+    carryUntil: monthEnd(year + 1, cfg.carryUntilMonth),
+    choice: choice ? { option: choice.option, days: choice.days } : null,
+  };
+}
+
+export async function setYearEndChoice(actor: CurrentUser, input: { option: "CASH" | "CARRY"; days: number }) {
+  const st = await yearEndStatus(actor.employeeId);
+  if (!st) throw badState("There's no year-end leave choice for you.");
+  if (!st.open) throw badState(`The year-end choice is open from ${formatDate(st.opensOn)} to ${formatDate(st.closesOn)}.`);
+  if (!(input.days > 0) || input.days > st.tradable) throw invalid(`Choose between 0.5 and ${st.tradable} day(s).`);
+  if ((input.days * 2) % 1 !== 0) throw invalid("Use whole or half days.");
+  return withTx(async (tx) => {
+    const key = { employeeId_requestTypeId_year: { employeeId: actor.employeeId, requestTypeId: st.type.id, year: st.year } };
+    const before = await tx.leaveYearEndChoice.findUnique({ where: key });
+    const saved = await tx.leaveYearEndChoice.upsert({ where: key, create: { employeeId: actor.employeeId, requestTypeId: st.type.id, year: st.year, option: input.option, days: input.days }, update: { option: input.option, days: input.days } });
+    await audit(tx, { actorUserId: actor.userId, action: "leave.yearend.choose", entityType: "LeaveYearEndChoice", entityId: saved.id, before, after: saved });
+    return saved;
+  });
+}
+
+/** HR overview of everyone's year-end choices (days are re-checked against the balance at 31 Dec). */
+export async function yearEndChoices(actor: CurrentUser, year: number) {
+  if (!can(actor, "requestType.manage") && !can(actor, "report.export")) throw forbidden();
+  const choices = await db.leaveYearEndChoice.findMany({ where: { year }, include: { employee: { select: { id: true, fullName: true, employeeCode: true } }, requestType: { select: { name: true } } }, orderBy: { employee: { fullName: "asc" } } });
+  const s = await getSettings();
+  return Promise.all(
+    choices.map(async (c) => {
+      const bal = await leaveBalance(db, c.employeeId, c.requestTypeId, year, undefined, `${year}-12-31`);
+      return { ...c, leftover: bal?.remaining ?? 0, effectiveDays: Math.min(c.days, Math.max(0, bal?.remaining ?? 0), s.leaveYearEnd.maxDays) };
+    }),
+  );
+}
+
+/**
+ * Annual leave policy (types with `annualRules`): usage tiers, max days off in one stretch and the
+ * share of colleagues on leave on the same date. Returns human-readable problems (empty = OK).
+ */
+export async function annualRuleIssues(tx: DbOrTx, employeeId: string, type: { id: string; annualRules: boolean }, input: { id?: string; startDate: ISODate; endDate: ISODate }, dates: ISODate[], days: number) {
+  if (!type.annualRules || !dates.length) return [];
+  const settings = await getSettings(tx);
+  const r = settings.annualLeaveRules;
+  const issues: string[] = [];
+  const year = Number(input.startDate.slice(0, 4));
+  const others = await tx.request.findMany({
+    where: { employeeId, requestTypeId: type.id, id: input.id ? { not: input.id } : undefined, status: { in: ACTIVE_STATUSES }, startDate: { gte: fromISO(`${year}-01-01`), lte: fromISO(`${year}-12-31`) } },
+  });
+  const tier = checkTiers({ start: input.startDate, end: input.endDate, days }, others.map((o) => ({ start: toISO(o.startDate), end: toISO(o.endDate), days: o.workingDays })), r);
+  if (tier) issues.push(tier);
+
+  const holidays = await getHolidays(tx, addDaysISO(input.startDate, -31), addDaysISO(input.endDate, 31));
+  const holidaySet = new Set(holidays.filter((h) => isHolidayEffective(h, settings.cutiBersamaIsHoliday)).map((h) => h.date));
+  const isOff = (d: ISODate) => !settings.workingWeekdays.includes(isoWeekdayOf(d)) || holidaySet.has(d);
+  const stretch = offStretch(input.startDate, input.endDate, isOff, (d) => holidaySet.has(d), addDaysISO);
+  if (stretch.days > r.maxOffDays) issues.push(`That's ${stretch.days} days off in a row (${formatDateRange(stretch.from, stretch.to)}, including holidays). The maximum is ${r.maxOffDays} days.`);
+
+  const headcount = await tx.employee.count({ where: { isActive: true } });
+  const cap = concurrencyCap(headcount, r.maxConcurrentPercent);
+  const overlapping = await tx.request.findMany({
+    where: { employeeId: { not: employeeId }, employee: { isActive: true }, status: { in: ACTIVE_STATUSES }, requestType: { category: "LEAVE" }, startDate: { lte: fromISO(input.endDate) }, endDate: { gte: fromISO(input.startDate) } },
+    select: { employeeId: true, startDate: true, endDate: true },
+  });
+  for (const d of dates) {
+    const out = new Set(overlapping.filter((o) => toISO(o.startDate) <= d && toISO(o.endDate) >= d).map((o) => o.employeeId));
+    if (out.size >= cap) {
+      issues.push(`${formatDate(d)}: ${out.size} colleague(s) are already on leave — at most ${r.maxConcurrentPercent}% of the team (${cap} of ${headcount}) can be on leave on the same date.`);
+      break;
+    }
+  }
+  return issues;
 }
 
 async function validate(tx: Tx, actor: CurrentUser, input: RequestInput, submitting: boolean) {
@@ -119,9 +246,10 @@ async function validate(tx: Tx, actor: CurrentUser, input: RequestInput, submitt
   if (conflicts.length)
     throw conflict(`Overlaps your ${conflicts[0].requestType.name.toLowerCase()} (${formatDateRange(toISO(conflicts[0].startDate), toISO(conflicts[0].endDate))}, ${conflicts[0].status.replace(/_/g, " ").toLowerCase()}).`);
 
-  if (type.deductsBalance && submitting) {
-    const bal = await leaveBalance(tx, actor.employeeId, type.id, Number(input.startDate.slice(0, 4)), input.id);
-    if (bal && bal.remaining < days) throw invalid(`Insufficient ${type.name.toLowerCase()} balance: ${bal.remaining} day(s) remaining, ${days} requested.`);
+  // Requests beyond the balance are allowed: the excess is unpaid leave, flagged to the employee and the approver.
+  if (submitting) {
+    const issues = await annualRuleIssues(tx, actor.employeeId, type, input, dates, days);
+    if (issues.length) throw invalid(issues[0], { issues });
   }
 
   let delegations = (input.delegations ?? []).filter((d) => d.delegateId || d.handoverNotes.trim());
@@ -222,12 +350,17 @@ export async function computeRequestImpact(actor: CurrentUser, input: Omit<Reque
       notes: after.requirement.warnings.filter((w) => w.code === "LEAVE_EXCLUDED" || w.code === "UNACHIEVABLE").map((w) => w.message),
     });
   }
-  const balance = type.deductsBalance ? await leaveBalance(db, actor.employeeId, type.id, Number(input.startDate.slice(0, 4)), input.id) : null;
+  const balance = type.deductsBalance ? await leaveBalance(db, actor.employeeId, type.id, Number(input.startDate.slice(0, 4)), input.id, input.startDate) : null;
   const conflicts = await findConflicts(db, actor.employeeId, input);
+  const ruleIssues = await annualRuleIssues(db, actor.employeeId, type, input, dates, days);
+  const leadDays = eachDate(today, input.startDate).length - 1;
+  if (type.advanceNoticeDays > 0 && (input.startDate < today || leadDays < type.advanceNoticeDays))
+    ruleIssues.unshift(`${type.name} must be requested at least ${type.advanceNoticeDays} days in advance (earliest start: ${formatDate(addDaysISO(today, type.advanceNoticeDays))}).`);
   return {
+    ruleIssues,
     workingDays: days,
     perMonth,
-    balance: balance ? { ...balance, afterApproval: balance.remaining - days } : null,
+    balance: balance ? { ...balance, afterApproval: balance.remaining - days, unpaidDays: unpaidDays(balance.remaining, days) } : null,
     conflicts: conflicts.map((c) => `${c.requestType.name} ${formatDateRange(toISO(c.startDate), toISO(c.endDate))} (${c.status.replace(/_/g, " ").toLowerCase()})`),
   };
 }
@@ -306,6 +439,14 @@ export async function submitRequest(actor: CurrentUser, input: RequestInput) {
     // If the leader is also a delegate, acceptance and approval still remain separate steps.
     const steps: StepSpec[] = delegations.map((d) => ({ kind: "DELEGATE" as const, assigneeId: d.delegateId }));
     steps.push({ kind: "LEADER", assigneeId: leader.assigneeId });
+    // Final approval after the leader (e.g. CEO) for configured request types — skipped when that person
+    // is the requester or already the approving leader.
+    const settings = await getSettings(tx);
+    const finalId = settings.finalApproverEmployeeId;
+    if (finalId && settings.finalApprovalRequestTypes.includes(type.id) && finalId !== actor.employeeId && finalId !== leader.assigneeId) {
+      const fa = await tx.employee.findUnique({ where: { id: finalId }, select: { isActive: true } });
+      if (fa?.isActive) steps.push({ kind: "FINAL", assigneeId: finalId });
+    }
     await startWorkflow(tx, { subjectType: "REQUEST", subjectId: request.id, requesterId: actor.employeeId, steps, actorEmployeeId: actor.employeeId, comment: input.reason });
     await tx.request.update({ where: { id: request.id }, data: { submittedAt: new Date() } });
     const range = formatDateRange(input.startDate, input.endDate);
@@ -392,7 +533,13 @@ export async function onRequestWorkflow(tx: Tx, wf: ApprovalWorkflow, outcome: O
     return;
   }
   if (outcome === "ADVANCED" && nextStep) {
-    await notify(tx, { employeeId: nextStep.assigneeId, type: "REQUEST_PENDING", title: `HR approval needed: ${r.employee.fullName}`, body: `${r.requestType.name} ${range}`, link: "/approvals" });
+    await notify(tx, {
+      employeeId: nextStep.assigneeId,
+      type: "REQUEST_PENDING",
+      title: `${nextStep.kind === "FINAL" ? "Final approval" : "HR approval"} needed: ${r.employee.fullName}`,
+      body: `${r.requestType.name} ${range} · approved by ${actor.fullName}`,
+      link: "/approvals",
+    });
     return;
   }
   if (outcome === "APPROVED") {
@@ -528,9 +675,9 @@ export async function requestTypesForForm() {
   return db.requestType.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } });
 }
 
-export async function balancesFor(employeeId: string, year: number) {
+export async function balancesFor(employeeId: string, year: number, asOf?: ISODate) {
   const types = await db.requestType.findMany({ where: { isActive: true, deductsBalance: true }, orderBy: { sortOrder: "asc" } });
-  return Promise.all(types.map(async (t) => ({ type: t, ...(await leaveBalance(db, employeeId, t.id, year))! })));
+  return Promise.all(types.map(async (t) => ({ type: t, ...(await leaveBalance(db, employeeId, t.id, year, undefined, asOf))! })));
 }
 
 export type { RequestWithType };

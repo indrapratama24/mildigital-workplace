@@ -5,6 +5,8 @@ import { DomainError } from "@/server/errors";
 import { can } from "@/server/authz";
 import { changeClientStatus, clientsForEmployee, createClient, getClient, listClients, removePackage, updateClient, type CreateClientInput } from "@/server/services/clients";
 import { portfolioSummary } from "@/server/services/client-metrics";
+import { clientCsvTemplate, importClientsCsv } from "@/server/services/client-import";
+import { CLIENT_CSV_COLUMNS, clientsExportCsv } from "@/server/services/clients";
 import {
   acknowledgeRegulation,
   announcementsFor,
@@ -137,10 +139,12 @@ describe("Client records", () => {
 
   it("sensitive client data is limited to managers and the assigned team", async () => {
     const m = await manager();
-    const c = await createClient(m, input({ picName: "Pak Demo", picContact: "+62 800", internalNotes: "Renewal risk" }));
-    expect((await getClient(await org.actor("junior"), c.id)).picContact).toBeNull();
-    expect((await getClient(await org.actor("principal"), c.id)).picContact).toBe("+62 800"); // Consultant 1
-    expect((await getClient(m, c.id)).picContact).toBeNull(); // client.manage alone doesn't include client.sensitive
+    const c = await createClient(m, input({ picName: "Pak Demo", picPhone: "+62 800 1234", picEmail: "Pic@Brand.id", internalNotes: "Renewal risk" }));
+    expect((await getClient(await org.actor("junior"), c.id)).picPhone).toBeNull();
+    const assigned = await getClient(await org.actor("principal"), c.id); // Consultant 1
+    expect([assigned.picPhone, assigned.picEmail]).toEqual(["+62 800 1234", "pic@brand.id"]);
+    expect((await getClient(m, c.id)).picEmail).toBeNull(); // client.manage alone doesn't include client.sensitive
+    await expectError(createClient(m, input({ name: "Bad", picEmail: "not-an-email" })), "VALIDATION", /PIC email/);
   });
 });
 
@@ -232,5 +236,84 @@ describe("Company Hub", () => {
     await expectError(saveAnnouncement(hr, null, { ...base, title: "No target", publishAt: "2026-11-01T00:00:00Z", audienceType: "TEAMS", teamIds: [] }), "VALIDATION");
     expect((await announcementsFor(org.ids.junior)).map((a) => a.title)).toEqual(["Everyone"]);
     expect((await announcementsFor(org.ids.principal)).map((a) => a.title).sort()).toEqual(["Everyone", "Just you"]);
+  });
+});
+
+describe("Classification, ad accounts and CSV import", () => {
+  it("industries and sub-industries are created once and reused; ad accounts can be extended", async () => {
+    const m = await manager();
+    const fashion = await db.clientCategory.create({ data: { name: "Retail-Fashion" } });
+    await db.clientAdAccountType.create({ data: { name: "Meta Regular" } });
+    const a = await createClient(m, input({ name: "Alpha", categoryId: fashion.id, industryName: "Apparel", subIndustryName: "Hijab", adAccounts: ["Meta Regular", "New Platform"] }));
+    await createClient(m, input({ name: "Beta", categoryId: fashion.id, industryName: "apparel", subIndustryName: "HIJAB", adAccounts: ["meta regular"] }));
+    expect(await db.clientIndustry.count()).toBe(1);
+    expect(await db.clientSubIndustry.count()).toBe(1);
+    expect((await db.clientAdAccountType.findMany()).map((t) => t.name).sort()).toEqual(["Meta Regular", "New Platform"]);
+    const d = await getClient(m, a.id);
+    expect([d.category, d.industry, d.subIndustry]).toEqual(["Retail-Fashion", "Apparel", "Hijab"]);
+    expect(d.adAccounts.sort()).toEqual(["Meta Regular", "New Platform"]);
+    await expectError(createClient(m, input({ name: "Charlie", subIndustryName: "Orphan" })), "VALIDATION", /industry/);
+  });
+
+  it("imports new clients and updates existing ones from the template columns", async () => {
+    const m = await manager();
+    const fnb = await db.clientCategory.create({ data: { name: "F&B" } });
+    expect(clientCsvTemplate().split("\n")[0]).toBe(CLIENT_CSV_COLUMNS.join(","));
+    const emp = await db.employee.findUniqueOrThrow({ where: { id: org.ids.principal } });
+    const as = await db.employee.findUniqueOrThrow({ where: { id: org.ids.junior } });
+    const header = CLIENT_CSV_COLUMNS.join(",");
+    const row = (cells: Partial<Record<(typeof CLIENT_CSV_COLUMNS)[number], string>>) => CLIENT_CSV_COLUMNS.map((c) => cells[c] ?? "").map((v) => (/[,;"]/.test(v) ? `"${v}"` : v)).join(",");
+    const csv = [
+      header,
+      row({ brand_name: "Kopi Import", status: "Active", date_start: "01/03/2025", package: "advance", category: "F&B", industry: "Coffee", sub_industry: "Specialty", ad_accounts: "Meta Regular; TTAM", consultant_1: emp.email, ads_strategists: as.employeeCode, pic_phone: "+62 811 222 333", pic_email: "pic@kopi.id" }),
+      row({ brand_name: "Old Brand", status: "Inactive", date_start: "2022-01-01", date_off: "2024-12-31", package: "Basic", consultant_1: emp.email }),
+    ].join("\n");
+
+    const bad = await importClientsCsv(m, `${header}\n${row({ brand_name: "X", date_start: "2025-01-01", package: "Gold", consultant_1: "nobody@x.id" })}`, false);
+    expect(bad.dryRun).toBe(true); // errors → nothing written
+    expect(bad.rows[0].errors.join(" ")).toMatch(/Gold.*|nobody/);
+    expect(await db.clientBrand.count()).toBe(0);
+
+    const dry = await importClientsCsv(m, csv, true);
+    expect(dry.rows.map((r) => [r.action, r.errors])).toEqual([["create", []], ["create", []]]);
+    expect(await db.clientBrand.count()).toBe(0);
+
+    const done = await importClientsCsv(m, csv, false);
+    expect([done.created, done.updated, done.failed]).toEqual([2, 0, 0]);
+    const { rows } = await listClients(m, { sort: "name" });
+    const kopi = rows.find((r) => r.name === "Kopi Import")!;
+    expect([kopi.category, kopi.industry, kopi.subIndustry, kopi.dateStart, kopi.package?.name]).toEqual(["F&B", "Coffee", "Specialty", "2025-03-01", "Advance"]);
+    expect(kopi.adAccounts.sort()).toEqual(["Meta Regular", "TTAM"]);
+    expect(kopi.adsStrategists.map((p) => p.id)).toEqual([org.ids.junior]);
+    expect(rows.find((r) => r.name === "Old Brand")?.status).toBe("INACTIVE");
+    expect(fnb.id).toBe(kopi.categoryId);
+
+    // Re-import with the Client ID → update, status changes are not applied by import
+    const again = await importClientsCsv(m, [header, row({ client_id: kopi.clientCode, brand_name: "Kopi Import 2", status: "Freeze", date_start: "2025-03-01", package: "Basic", consultant_1: emp.email })].join("\n"), false);
+    expect([again.created, again.updated]).toEqual([0, 1]);
+    expect(again.rows[0].warnings[0]).toMatch(/Status stays active/);
+    const updated = (await listClients(m, { q: kopi.clientCode })).rows[0];
+    expect([updated.name, updated.status, updated.package?.name, updated.adAccounts]).toEqual(["Kopi Import 2", "ACTIVE", "Basic", []]);
+
+    // Export uses the same columns (people as work emails) so it can be re-imported
+    const exported = await clientsExportCsv(m, rows);
+    expect(exported.split("\n")[0]).toBe(`${header},period`);
+    expect(exported).toContain(emp.email);
+    await expectError(importClientsCsv(await org.actor("junior"), csv, true), "FORBIDDEN");
+  });
+});
+
+describe("Client team change date", () => {
+  it("records a PIC change from the chosen date and rejects future dates", async () => {
+    const m = await manager();
+    const c = await createClient(m, input({ dateStart: "2025-01-01" }));
+    // created today (2 Nov 2026); move Consultant 1 to someone else effective 2 Nov, add an AS from 2 Nov
+    await updateClient(m, c.id, { ...upd(c.clientCode, { dateStart: "2025-01-01", team: { primary: org.ids.peer, secondary: null, additional: [], adsStrategists: [org.ids.junior] } }), teamEffectiveDate: "2026-11-02" });
+    await expectError(updateClient(m, c.id, { ...upd(c.clientCode, { dateStart: "2025-01-01" }), teamEffectiveDate: "2026-12-01" }), "VALIDATION", /future/);
+    const hist = (await getClient(m, c.id)).assignmentHistory;
+    expect(hist.filter((a) => !a.to).map((a) => [a.employee.id, a.role, a.from]).sort()).toEqual(
+      [[org.ids.peer, "CONSULTANT_PRIMARY", "2026-11-02"], [org.ids.junior, "ADS_STRATEGIST", "2026-11-02"]].sort(),
+    );
+    expect(hist.find((a) => a.employee.id === org.ids.principal)?.to).toBe("2026-11-02"); // started the same day → closed that day
   });
 });

@@ -23,6 +23,8 @@ export interface CurrentUser {
   jobTitle: string;
   /** Extra permissions granted individually (PermissionGrant). */
   grants?: string[];
+  /** After an admin password reset: must set a new password before using the app. */
+  mustChangePassword?: boolean;
 }
 
 export async function createSession(userId: string) {
@@ -56,7 +58,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   });
   if (!session || session.expiresAt < new Date() || !session.user.isActive || !session.user.employee?.isActive) return null;
   const e = session.user.employee;
-  return { userId: session.user.id, email: session.user.email, role: session.user.role, employeeId: e.id, fullName: e.fullName, jobTitle: e.jobTitle, grants: session.user.grants.map((g) => g.permission) };
+  return { userId: session.user.id, email: session.user.email, role: session.user.role, employeeId: e.id, fullName: e.fullName, jobTitle: e.jobTitle, grants: session.user.grants.map((g) => g.permission), mustChangePassword: session.user.mustChangePassword };
 });
 
 // Simple in-memory login throttle (per email + per process). Replace with Redis for multi-instance deployments.

@@ -1,19 +1,22 @@
 import { db } from "@/server/db";
 import { requirePagePermission } from "@/server/auth/guard";
-import { listPackages } from "@/server/services/clients";
+import { clientTaxonomy, listPackages } from "@/server/services/clients";
 import { getSettings } from "@/server/services/settings";
 import { CLIENT_ROLE_LABEL, MAX_ADS_STRATEGISTS } from "@/lib/engine/clients";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Table } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
-import { ClientRulesForm, PackageRow } from "../workplace-forms";
+import { ClientRulesForm, IndustryRow, NamedListRow, PackageRow } from "../workplace-forms";
 
 export default async function ClientSettingsPage() {
   await requirePagePermission("clientPackage.manage");
-  const [packages, settings, usage] = await Promise.all([
+  const [packages, settings, usage, taxonomy, adTypes, catUsage] = await Promise.all([
     listPackages({ includeInactive: true }),
     getSettings(),
     db.clientEngagementPackage.groupBy({ by: ["packageId"], where: { effectiveTo: null, engagement: { endDate: null, brand: { archivedAt: null } } }, _count: { _all: true } }),
+    clientTaxonomy(),
+    db.clientAdAccountType.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], include: { _count: { select: { brands: true } } } }),
+    db.clientBrand.groupBy({ by: ["categoryId"], where: { archivedAt: null }, _count: { _all: true } }),
   ]);
   const count = (id: string) => usage.find((u) => u.packageId === id)?._count._all ?? 0;
   return (
@@ -23,6 +26,27 @@ export default async function ClientSettingsPage() {
         <CardBody>
           {packages.map((p) => <PackageRow key={p.id} pkg={{ id: p.id, name: p.name, description: p.description, isActive: p.isActive, sortOrder: p.sortOrder }} clients={count(p.id)} />)}
           <PackageRow />
+        </CardBody>
+      </Card>
+      <Card>
+        <CardHeader title="Brand categories" description="Category → Industry → Sub-industry. Industries and sub-industries are added from the client form (or import) and listed below." />
+        <CardBody>
+          {taxonomy.categories.map((c) => <NamedListRow key={c.id} kind="category" item={c} usage={catUsage.find((u) => u.categoryId === c.id)?._count._all ?? 0} />)}
+          <NamedListRow kind="category" />
+        </CardBody>
+      </Card>
+      <Card>
+        <CardHeader title="Industries & sub-industries" description="Rename, move to another category, or delete unused entries. Click a sub-industry to rename or delete it." />
+        <CardBody>
+          {taxonomy.industries.length === 0 && <p className="text-[13px] text-muted">None yet — they appear when typed on a client.</p>}
+          {taxonomy.industries.map((i) => <IndustryRow key={i.id} industry={i} categories={taxonomy.categories} />)}
+        </CardBody>
+      </Card>
+      <Card>
+        <CardHeader title="Ad accounts" description="Ad account types a client can be handled on. New names typed on a client are added here." />
+        <CardBody>
+          {adTypes.map((t) => <NamedListRow key={t.id} kind="adAccount" item={{ id: t.id, name: t.name, isActive: t.isActive, sortOrder: t.sortOrder }} usage={t._count.brands} />)}
+          <NamedListRow kind="adAccount" />
         </CardBody>
       </Card>
       <Card>

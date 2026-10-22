@@ -24,7 +24,7 @@ export default async function NewClientPage() {
         requirePrimary={settings.clientRequirePrimaryConsultant}
         canChangeCode
         canEditSensitive
-        industries={opts.industries}
+        taxonomy={{ categories: opts.categories, industries: opts.industries, adAccounts: opts.adAccounts }}
       />
     </>
   );

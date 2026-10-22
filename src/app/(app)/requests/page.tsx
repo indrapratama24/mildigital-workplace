@@ -2,9 +2,10 @@ import Link from "next/link";
 import { FileText, GitPullRequestArrow } from "lucide-react";
 import { db } from "@/server/db";
 import { requirePageUser } from "@/server/auth/guard";
-import { listMyRequests } from "@/server/services/requests";
+import { listMyRequests, yearEndStatus } from "@/server/services/requests";
+import { YearEndCard } from "@/components/app/requests/year-end-card";
 import { listMyRevisions, describeChanges } from "@/server/services/revisions";
-import { formatDateRange, formatDateTime, formatMonth, toISO } from "@/lib/dates";
+import { formatDate, formatDateRange, formatDateTime, formatMonth, toISO } from "@/lib/dates";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState, PageHeader, Table } from "@/components/ui/misc";
 import { StatusBadge } from "@/components/ui/status";
@@ -15,15 +16,33 @@ export const metadata = { title: "Requests & Approvals" };
 
 export default async function RequestsPage() {
   const me = await requirePageUser();
-  const [requests, revisions, approvals, delegations] = await Promise.all([
+  const [requests, revisions, approvals, delegations, yearEnd] = await Promise.all([
     listMyRequests(me.employeeId),
     listMyRevisions(me.employeeId),
-    db.approvalStep.count({ where: { assigneeId: me.employeeId, kind: { in: ["LEADER", "HR"] }, status: "PENDING", workflow: { status: "PENDING" } } }),
+    db.approvalStep.count({ where: { assigneeId: me.employeeId, kind: { in: ["LEADER", "HR", "FINAL"] }, status: "PENDING", workflow: { status: "PENDING" } } }),
     db.approvalStep.count({ where: { assigneeId: me.employeeId, kind: "DELEGATE", status: { in: ["PENDING", "CLARIFICATION_REQUESTED"] }, workflow: { status: "PENDING" } } }),
+    yearEndStatus(me.employeeId),
   ]);
   return (
     <>
       <PageHeader eyebrow="Requests & Approvals" title="My requests" description="Leave, permissions, offsite duty and schedule changes — with their approval status." />
+      {yearEnd && (yearEnd.open || yearEnd.choice) && (
+        <YearEndCard
+          info={{
+            year: yearEnd.year,
+            typeName: yearEnd.type.name,
+            open: yearEnd.open,
+            opensOn: yearEnd.opensOn,
+            closesOn: yearEnd.closesOn,
+            projectedRemaining: yearEnd.projectedRemaining,
+            tradable: yearEnd.tradable,
+            maxDays: yearEnd.maxDays,
+            carryUntilLabel: formatDate(yearEnd.carryUntil),
+            closesLabel: formatDate(yearEnd.closesOn),
+            choice: yearEnd.choice,
+          }}
+        />
+      )}
       <RequestTabs active="mine" approvals={approvals} delegations={delegations} showAll={can(me, "approval.reassign")} />
       <div className="space-y-5">
         <Card>

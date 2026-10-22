@@ -9,7 +9,7 @@ import { Button, buttonClass } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Notice } from "@/components/ui/misc";
-import { formatDate, formatMonth } from "@/lib/dates";
+import { addDays, formatDate, formatMonth } from "@/lib/dates";
 import type { computeRequestImpact } from "@/server/services/requests";
 import { cn } from "@/lib/cn";
 
@@ -174,7 +174,16 @@ export function RequestForm({ types, colleagues, initial, employeeName, today }:
           <CardHeader title="Request details" description={`Employee: ${employeeName}`} />
           <CardBody className="space-y-4">
             <Field label="Request type" required error={errors.type} htmlFor="type">
-              <Select id="type" value={f.requestTypeId} onChange={(e) => set("requestTypeId", e.target.value)}>
+              <Select
+                id="type"
+                value={f.requestTypeId}
+                onChange={(e) => {
+                  const t = types.find((x) => x.id === e.target.value);
+                  // new requests start no earlier than the type's notice period allows
+                  const earliest = t && t.advanceNoticeDays > 0 ? addDays(today, t.advanceNoticeDays) : null;
+                  setF((p) => (!p.id && earliest && p.startDate < earliest ? { ...p, requestTypeId: e.target.value, startDate: earliest, endDate: p.endDate < earliest ? earliest : p.endDate } : { ...p, requestTypeId: e.target.value }));
+                }}
+              >
                 <option value="">Choose…</option>
                 {grouped.map((g) =>
                   g.items.length ? (
@@ -216,7 +225,7 @@ export function RequestForm({ types, colleagues, initial, employeeName, today }:
                     </Field>
                     <div className="hidden sm:block" />
                     <Field label={singleDay ? "Date" : "Start date"} required error={errors.startDate}>
-                      <Input type="date" value={f.startDate} min={type.advanceNoticeDays > 0 ? today : undefined} onChange={(e) => set("startDate", e.target.value)} />
+                      <Input type="date" value={f.startDate} min={type.advanceNoticeDays > 0 ? addDays(today, type.advanceNoticeDays) : undefined} onChange={(e) => set("startDate", e.target.value)} />
                     </Field>
                     {!singleDay && (
                       <Field label="End date" required>
@@ -359,6 +368,11 @@ export function RequestForm({ types, colleagues, initial, employeeName, today }:
                     </span>
                     <b className="text-ink tabular">{impact.workingDays}</b>
                   </div>
+                  {impact.ruleIssues.length > 0 && (
+                    <Notice tone="danger" title="Doesn't meet the leave rules">
+                      <ul className="list-disc space-y-0.5 pl-4">{impact.ruleIssues.map((x) => <li key={x}>{x}</li>)}</ul>
+                    </Notice>
+                  )}
                   {impact.conflicts.length > 0 && (
                     <Notice tone="danger" title="Conflicts with another request">
                       {impact.conflicts.join("; ")}
@@ -367,12 +381,24 @@ export function RequestForm({ types, colleagues, initial, employeeName, today }:
                   {impact.balance && (
                     <div className="rounded-xl border border-line-2 p-3 text-[13px]">
                       <div className="mb-1.5 font-medium text-ink">{type?.name} balance</div>
-                      <Row label="Entitled" value={impact.balance.entitled} />
+                      {impact.balance.monthlyAccrual && (
+                        <p className="mb-1.5 text-[11.5px] text-muted">
+                          {impact.balance.eligible && impact.balance.eligibleSince
+                            ? `Earned 1 day per month (${impact.balance.yearly}/year) — counted up to ${formatDate(impact.balance.asOf)}, when this leave starts.`
+                            : "Annual leave is earned by full-time employees only."}
+                        </p>
+                      )}
+                      <Row label={impact.balance.monthlyAccrual ? `Earned by ${formatDate(impact.balance.asOf).replace(/ \d{4}$/, "")}` : "Entitled"} value={impact.balance.entitled} />
                       <Row label="Used" value={impact.balance.used} />
                       <Row label="Pending" value={impact.balance.pending} />
                       <Row label="Remaining" value={impact.balance.remaining} />
                       <Row label="After approval" value={impact.balance.afterApproval} strong tone={impact.balance.afterApproval < 0 ? "danger" : undefined} />
                     </div>
+                  )}
+                  {impact.balance && impact.balance.unpaidDays > 0 && (
+                    <Notice tone="danger" title={`${impact.balance.unpaidDays} day(s) would be unpaid leave`}>
+                      This request is more than your remaining {type?.name.toLowerCase()} balance. The extra {impact.balance.unpaidDays} day(s) will be taken as <b>unpaid leave</b>, and the request is likely to be declined by your leader. Please reconsider the dates or the number of days.
+                    </Notice>
                   )}
                   {impact.perMonth.map((m) => (
                     <div key={`${m.year}-${m.month}`} className="rounded-xl border border-line-2 p-3 text-[13px]">

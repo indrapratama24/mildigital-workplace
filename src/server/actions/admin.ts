@@ -2,14 +2,15 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission, requireUser } from "../auth/guard";
-import { runAction } from "../errors";
-import { changeLevel, createEmployee, importEmployeesCsv, setEmployeeActive, setLeader, updateEmployee } from "../services/org";
+import { invalid, runAction } from "../errors";
+import { changeLevel, createEmployee, setEmployeeActive, setLeader, updateEmployee } from "../services/org";
 import { assignPolicyOverride, cancelPolicyVersion, createPolicyVersion, previewPolicyWarnings, updatePolicyVersion } from "../services/policy";
 import { createLevel, createPolicy, deleteHoliday, importHolidaysCsv, removePolicy, restorePolicy, setLeaveBalance, updateLevel, updatePolicyDetails, upsertDepartment, upsertHoliday, upsertRequestType, upsertTeam } from "../services/admin";
 import { updateSettings } from "../services/settings";
 import { runDailyJobs } from "../services/jobs";
 import { sweepEventsOnOffDays } from "../services/events";
 import { db } from "../db";
+import { importEmployeesCsvV2 } from "../services/employee-import";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date");
 const weekdays = z.array(z.number().int().min(1).max(7)).max(7);
@@ -53,6 +54,7 @@ export async function updateEmployeeAction(id: string, input: unknown) {
         teamId: z.string().nullable().optional(),
         role: z.enum(["EMPLOYEE", "LEADER", "HR", "SUPER_ADMIN"]).optional(),
         roleDescription: z.string().max(1000).nullable().optional(),
+        fullTimeSince: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
       })
       .parse(input);
     await updateEmployee(me, id, p);
@@ -84,16 +86,6 @@ export async function changeLevelAction(input: unknown) {
     await changeLevel(me, p);
     refresh();
   }, "Level change scheduled");
-}
-
-export async function importEmployeesAction(input: unknown) {
-  return runAction(async () => {
-    const me = await requireUser();
-    const p = z.object({ csv: z.string().max(500_000), dryRun: z.boolean() }).parse(input);
-    const r = await importEmployeesCsv(me, p.csv, p.dryRun);
-    if (!p.dryRun) refresh();
-    return r;
-  });
 }
 
 export async function policyOverrideAction(input: unknown) {
@@ -255,6 +247,9 @@ export async function upsertRequestTypeAction(input: unknown) {
         allowHourly: z.boolean(),
         deductsBalance: z.boolean(),
         defaultEntitlement: z.number().nullable(),
+        monthlyAccrual: z.boolean(),
+        eligibleStatuses: z.array(z.enum(["PERMANENT", "CONTRACT", "PROBATION", "INTERN"])),
+        annualRules: z.boolean(),
         isSensitive: z.boolean(),
         isActive: z.boolean(),
       })
@@ -314,11 +309,48 @@ export async function updateSettingsAction(input: unknown) {
   }, "Settings saved");
 }
 
+export async function updateLeaveRulesAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requirePermission("requestType.manage");
+    const n = (min: number, max: number) => z.number().min(min).max(max);
+    const p = z
+      .object({
+        annualLeaveRules: z.object({ tier1MaxDays: n(1, 60), tier2MaxDays: n(1, 60), tier2GapDays: n(0, 365), laterMaxDays: n(0.5, 60), maxOffDays: n(1, 120), maxConcurrentPercent: n(1, 100) }),
+        leaveYearEnd: z.object({ enabled: z.boolean(), maxDays: n(0, 60), windowDays: n(1, 120), carryUntilMonth: z.number().int().min(1).max(12) }),
+      })
+      .parse(input);
+    await updateSettings(me, p);
+    refresh();
+  }, "Leave rules saved");
+}
+
+export async function updateFinalApprovalAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requirePermission("settings.manage");
+    const p = z.object({ finalApproverEmployeeId: z.string().nullable(), finalApprovalRequestTypes: z.array(z.string()).max(50) }).parse(input);
+    if (p.finalApproverEmployeeId) {
+      const e = await db.employee.findUnique({ where: { id: p.finalApproverEmployeeId }, include: { user: true } });
+      if (!e?.isActive || !e.user || !["LEADER", "HR", "SUPER_ADMIN"].includes(e.user.role)) throw invalid("The final approver must be an active Leader, HR or Admin.");
+    }
+    await updateSettings(me, p);
+    refresh();
+  }, "Final approval saved");
+}
+
 export async function runJobsAction() {
   return runAction(async () => {
     await requirePermission("settings.manage");
     const r = await runDailyJobs();
     refresh();
+    return r;
+  });
+}
+
+export async function importTeamAction(text: unknown, dryRun: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    const r = await importEmployeesCsvV2(me, z.string().max(5_000_000).parse(text), z.boolean().parse(dryRun));
+    if (!r.dryRun) refresh();
     return r;
   });
 }

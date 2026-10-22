@@ -2,7 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Plus, X } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 import { createClientAction, updateClientAction } from "@/server/actions/workplace";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { collaborationPeriod, MAX_ADS_STRATEGISTS, validateTeam, type ClientStatusT } from "@/lib/engine/clients";
 import { formatDate } from "@/lib/dates";
-import type { ClientFormValues } from "./form-values";
+import type { ClientFormValues, TaxonomyOptions } from "./form-values";
 
 type Person = { id: string; fullName: string; jobTitle: string };
 type Pkg = { id: string; name: string; isActive: boolean };
@@ -28,7 +28,7 @@ export function ClientForm({
   canChangeCode,
   canEditSensitive,
   statusFrom,
-  industries,
+  taxonomy,
 }: {
   mode: "create" | "edit";
   clientId?: string;
@@ -41,16 +41,29 @@ export function ClientForm({
   canEditSensitive: boolean;
   /** Start of the current status period (edit mode) — status changes must be after it. */
   statusFrom?: string;
-  industries: string[];
+  taxonomy: TaxonomyOptions;
 }) {
   const router = useRouter();
   const [f, setF] = useState(initial);
   const [statusChange, setStatusChange] = useState({ effectiveDate: today, reason: "" });
+  const [teamFrom, setTeamFrom] = useState(today);
   const [pending, start] = useTransition();
   const [confirm, setConfirm] = useState(false);
   const saved = useRef(false);
   const set = <K extends keyof ClientFormValues>(k: K, v: ClientFormValues[K]) => setF((p) => ({ ...p, [k]: v }));
+  const [newAd, setNewAd] = useState("");
+  const industryOptions = taxonomy.industries.filter((i) => (f.categoryId ? i.categoryId === f.categoryId : true));
+  const currentIndustry = industryOptions.find((i) => i.name.toLowerCase() === f.industryName.trim().toLowerCase());
+  const subOptions = currentIndustry?.subIndustries ?? [];
+  const adOptions = [...new Map([...taxonomy.adAccounts.filter((a) => a.isActive).map((a) => a.name), ...f.adAccounts].map((n) => [n.toLowerCase(), n])).values()];
+  const addAd = () => {
+    const n = newAd.trim();
+    if (n && !f.adAccounts.some((a) => a.toLowerCase() === n.toLowerCase())) set("adAccounts", [...f.adAccounts, n]);
+    setNewAd("");
+  };
   const dirty = JSON.stringify(f) !== JSON.stringify(initial);
+  const teamOf = (v: ClientFormValues) => JSON.stringify([v.primary, v.secondary, [...v.additional].filter(Boolean).sort(), [...v.adsStrategists].sort()]);
+  const teamChanged = mode === "edit" && teamOf(f) !== teamOf(initial);
   const statusChanged = mode === "edit" && f.status !== initial.status;
 
   useEffect(() => {
@@ -91,12 +104,15 @@ export function ClientForm({
         team,
         waivePrimary: f.waivePrimary,
         waiverReason: f.waiverReason || null,
-        industry: f.industry || null,
+        categoryId: f.categoryId || null,
+        industryName: f.industryName.trim() || null,
+        subIndustryName: f.subIndustryName.trim() || null,
+        adAccounts: f.adAccounts,
         description: f.description || null,
         websiteUrl: f.websiteUrl || null,
         instagramUrl: f.instagramUrl || null,
         tiktokUrl: f.tiktokUrl || null,
-        ...(canEditSensitive ? { picName: f.picName || null, picContact: f.picContact || null, internalNotes: f.internalNotes || null } : {}),
+        ...(canEditSensitive ? { picName: f.picName || null, picPhone: f.picPhone || null, picEmail: f.picEmail || null, internalNotes: f.internalNotes || null } : {}),
       };
       const r =
         mode === "create"
@@ -104,6 +120,7 @@ export function ClientForm({
           : await updateClientAction(clientId!, {
               ...payload,
               clientCode: f.clientCode,
+              teamEffectiveDate: teamChanged ? teamFrom : null,
               status: statusChanged
                 ? { status: f.status, effectiveDate: f.status === "INACTIVE" ? null : statusChange.effectiveDate, dateOff: f.status === "INACTIVE" ? f.dateOff : null, reason: statusChange.reason || null }
                 : null,
@@ -135,9 +152,19 @@ export function ClientForm({
           <Field label="Client organization (optional)" hint="Legal/business client that owns this brand. Brands of the same owner share it.">
             <Input value={f.organizationName} onChange={(e) => set("organizationName", e.target.value)} placeholder="e.g. PT Bumi Berkah Boga" />
           </Field>
-          <Field label="Industry">
-            <Input value={f.industry} onChange={(e) => set("industry", e.target.value)} list="industries" placeholder="e.g. F&B" />
-            <datalist id="industries">{industries.map((i) => <option key={i} value={i} />)}</datalist>
+          <Field label="Category">
+            <Select value={f.categoryId} onChange={(e) => setF((p) => ({ ...p, categoryId: e.target.value, industryName: "", subIndustryName: "" }))}>
+              <option value="">— Choose category —</option>
+              {taxonomy.categories.filter((c) => c.isActive || c.id === initial.categoryId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Industry" hint="Pick one or type a new one — it's saved for other brands.">
+            <Input value={f.industryName} onChange={(e) => setF((p) => ({ ...p, industryName: e.target.value, subIndustryName: p.industryName === e.target.value ? p.subIndustryName : "" }))} list="client-industries" placeholder={f.categoryId ? "e.g. Apparel" : "Choose a category first"} disabled={!f.categoryId && !f.industryName} maxLength={80} />
+            <datalist id="client-industries">{industryOptions.map((i) => <option key={i.id} value={i.name} />)}</datalist>
+          </Field>
+          <Field label="Sub-industry" hint="e.g. Women's apparel, Hijab. New values are saved for reuse.">
+            <Input value={f.subIndustryName} onChange={(e) => set("subIndustryName", e.target.value)} list="client-subindustries" placeholder={f.industryName ? "e.g. Hijab" : "Choose an industry first"} disabled={!f.industryName.trim()} maxLength={80} />
+            <datalist id="client-subindustries">{subOptions.map((x) => <option key={x.id} value={x.name} />)}</datalist>
           </Field>
           <Field label="Brand description" className="sm:col-span-2">
             <Textarea value={f.description} onChange={(e) => set("description", e.target.value)} className="min-h-[70px]" />
@@ -191,8 +218,8 @@ export function ClientForm({
       </Card>
 
       <Card>
-        <CardHeader title="C. Package" description="Options come from Settings → Packages & client rules." />
-        <CardBody>
+        <CardHeader title="C. Package & ad accounts" description="Options come from Settings → Packages & client rules." />
+        <CardBody className="space-y-5">
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Package">
             {packages.filter((p) => p.isActive || p.id === initial.packageId).map((p) => (
               <button
@@ -208,6 +235,29 @@ export function ClientForm({
               </button>
             ))}
             {packages.length === 0 && <p className="text-[13px] text-muted">No packages configured yet.</p>}
+          </div>
+          <div>
+            <div className="mb-2 text-[13px] font-medium text-ink-2">Ad accounts handled</div>
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Ad accounts handled">
+              {adOptions.map((name) => {
+                const on = f.adAccounts.some((a) => a.toLowerCase() === name.toLowerCase());
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => set("adAccounts", on ? f.adAccounts.filter((a) => a.toLowerCase() !== name.toLowerCase()) : [...f.adAccounts, name])}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-medium ${on ? "border-brand-700 bg-brand-50 text-brand-700" : "border-line bg-white text-ink-2 hover:border-brand-300"}`}
+                  >
+                    {on && <Check className="h-3.5 w-3.5" />} {name}
+                  </button>
+                );
+              })}
+              <span className="inline-flex items-center gap-1">
+                <Input value={newAd} onChange={(e) => setNewAd(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addAd())} placeholder="Other ad account…" className="h-8 w-[180px] text-[13px]" maxLength={60} />
+                <Button size="sm" variant="secondary" disabled={!newAd.trim()} onClick={addAd}><Plus className="h-3.5 w-3.5" /> Add</Button>
+              </span>
+            </div>
           </div>
         </CardBody>
       </Card>
@@ -254,6 +304,13 @@ export function ClientForm({
               )}
             </div>
           </Field>
+          {teamChanged && (
+            <div className="rounded-xl border border-brand-200 bg-brand-50/50 p-3 sm:col-span-2">
+              <Field label="Team change effective from" hint="New or changed people start on this date; removed people end the day before. Use a past date to record a change that already happened.">
+                <Input type="date" value={teamFrom} max={today} min={f.dateStart || undefined} onChange={(e) => setTeamFrom(e.target.value)} className="max-w-[220px]" />
+              </Field>
+            </div>
+          )}
           {f.status === "ACTIVE" && requirePrimary && (
             <div className="space-y-2 sm:col-span-2">
               <Checkbox checked={f.waivePrimary} onChange={(e) => set("waivePrimary", e.target.checked)} label="Exception: active without Consultant 1" description="Recorded with your name in the audit log." />
@@ -272,7 +329,8 @@ export function ClientForm({
           {canEditSensitive && (
             <>
               <Field label="Client PIC name"><Input value={f.picName} onChange={(e) => set("picName", e.target.value)} /></Field>
-              <Field label="Client PIC contact" className="sm:col-span-2"><Input value={f.picContact} onChange={(e) => set("picContact", e.target.value)} placeholder="Phone or email" /></Field>
+              <Field label="Client PIC phone"><Input type="tel" value={f.picPhone} onChange={(e) => set("picPhone", e.target.value)} placeholder="+62 812-0000-0000" /></Field>
+              <Field label="Client PIC email"><Input type="email" value={f.picEmail} onChange={(e) => set("picEmail", e.target.value)} placeholder="name@company.com" /></Field>
               <Field label="Internal notes" className="sm:col-span-3"><Textarea value={f.internalNotes} onChange={(e) => set("internalNotes", e.target.value)} className="min-h-[80px]" /></Field>
             </>
           )}

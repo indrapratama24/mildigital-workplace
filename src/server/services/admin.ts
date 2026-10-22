@@ -1,5 +1,5 @@
 // Administration: holidays, request types, departments/teams, levels, leave balances.
-import type { HolidayType, Requirement, RequestCategory } from "@prisma/client";
+import type { HolidayType, Requirement, RequestCategory, EmploymentStatus } from "@prisma/client";
 import { db, withTx } from "../db";
 import { fromISO, isValidISO, todayJakarta } from "@/lib/dates";
 import type { CurrentUser } from "../auth/session";
@@ -88,6 +88,9 @@ export interface RequestTypeInput {
   allowHourly: boolean;
   deductsBalance: boolean;
   defaultEntitlement: number | null;
+  monthlyAccrual: boolean;
+  eligibleStatuses: EmploymentStatus[];
+  annualRules: boolean;
   isSensitive: boolean;
   isActive: boolean;
 }

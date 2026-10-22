@@ -17,6 +17,7 @@ export const DECISIONS_BY_KIND: Record<StepKind, Decision[]> = {
   DELEGATE: ["ACCEPT", "DECLINE", "REQUEST_CLARIFICATION"],
   LEADER: ["APPROVE", "REJECT", "REQUEST_CHANGES"],
   HR: ["APPROVE", "REJECT", "REQUEST_CHANGES"],
+  FINAL: ["APPROVE", "REJECT", "REQUEST_CHANGES"],
 };
 
 export interface StepSpec {

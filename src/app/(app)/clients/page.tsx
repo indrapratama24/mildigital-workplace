@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { Briefcase, CircleCheck, CirclePause, CircleX, Download, Layers, Plus, Sparkles } from "lucide-react";
+import { Briefcase, CircleCheck, CirclePause, CircleX, Download, Layers, Megaphone, Plus, Shapes, Sparkles, Tag, Upload, UserRound, Users } from "lucide-react";
 import { requirePageUser } from "@/server/auth/guard";
 import { can } from "@/server/authz";
 import { clientFilterOptions, listClients, type ClientFilters } from "@/server/services/clients";
-import { portfolioSummary } from "@/server/services/client-metrics";
+import { PORTFOLIO_BREAKDOWNS, portfolioSummary, type PortfolioBreakdown } from "@/server/services/client-metrics";
+import { getSettings } from "@/server/services/settings";
+import { HighlightsEditor } from "@/components/app/clients/highlights-editor";
 import { addMonths, currentMonthJakarta, formatDate, formatMonth, monthParam, parseMonthParam } from "@/lib/dates";
 import { CLIENT_STATUS_LABEL } from "@/lib/engine/clients";
 import { STATUS_TONE } from "@/components/app/clients/status";
@@ -27,11 +29,15 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     packageId: sp.package || undefined,
     consultantId: sp.consultant || undefined,
     asId: sp.as || undefined,
-    industry: sp.industry || undefined,
+    categoryId: sp.category || undefined,
+    industryId: sp.industry || undefined,
+    adAccountId: sp.ad || undefined,
     sort: (sp.sort as ClientFilters["sort"]) ?? "name",
     page: Number(sp.page ?? 1) || 1,
   };
-  const [list, opts, summary] = await Promise.all([listClients(me, filters), clientFilterOptions(), portfolioSummary(m.year, m.month)]);
+  const [list, opts, summary, settings] = await Promise.all([listClients(me, filters), clientFilterOptions(), portfolioSummary(m.year, m.month), getSettings()]);
+  const highlights = settings.clientHighlights.filter((k): k is PortfolioBreakdown => k in PORTFOLIO_BREAKDOWNS);
+  const canCustomize = can(me, "clientPackage.manage");
   const prev = addMonths(m.year, m.month, -1);
   const next = addMonths(m.year, m.month, 1);
   const isCurrent = m.year === cur.year && m.month === cur.month;
@@ -54,6 +60,11 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
               <a href={`/api/clients/export?${exportQs}`} className={buttonClass("secondary")}>
                 <Download className="h-4 w-4" /> Export CSV
               </a>
+            )}
+            {can(me, "client.manage") && (
+              <Link href="/clients/import" className={buttonClass("secondary")}>
+                <Upload className="h-4 w-4" /> Import CSV
+              </Link>
             )}
             {can(me, "client.manage") && (
               <Link href="/clients/new" className={buttonClass("primary")}>
@@ -82,11 +93,20 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         <Stat label="Total clients" value={summary.total} icon={Briefcase} tone="brand" />
         <Stat label={isCurrent ? "New this month" : "New in month"} value={summary.newThisPeriod} icon={Sparkles} hint="first collaboration starts" />
       </div>
-      <div className="mb-5 grid gap-4 lg:grid-cols-3">
-        <Breakdown title="Active by package" icon={Layers} rows={summary.byPackage} total={summary.active} />
-        <Breakdown title="Active by industry" icon={Briefcase} rows={summary.byIndustry} total={summary.active} />
-        <Breakdown title="Active by Consultant 1" icon={CircleCheck} rows={summary.byConsultant} total={summary.active} />
-      </div>
+      {(highlights.length > 0 || canCustomize) && (
+        <div className="mb-5">
+          {canCustomize && (
+            <div className="mb-2 flex justify-end">
+              <HighlightsEditor options={Object.entries(PORTFOLIO_BREAKDOWNS).map(([key, v]) => ({ key, title: v.title }))} selected={highlights} />
+            </div>
+          )}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {highlights.map((k) => (
+              <Breakdown key={k} title={PORTFOLIO_BREAKDOWNS[k].title} icon={BREAKDOWN_ICON[k]} rows={summary[PORTFOLIO_BREAKDOWNS[k].key]} total={summary.active} />
+            ))}
+          </div>
+        </div>
+      )}
 
       <Card>
         <form className="flex flex-wrap gap-2 p-4" method="get">
@@ -110,9 +130,17 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
             <option value="">All Ads Strategists</option>
             {opts.adsStrategists.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
           </Select>
+          <Select name="category" defaultValue={sp.category ?? ""} className="h-9 w-auto">
+            <option value="">All categories</option>
+            {opts.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
           <Select name="industry" defaultValue={sp.industry ?? ""} className="h-9 w-auto">
             <option value="">All industries</option>
-            {opts.industries.map((i) => <option key={i} value={i}>{i}</option>)}
+            {opts.industries.filter((i) => !sp.category || i.categoryId === sp.category).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          </Select>
+          <Select name="ad" defaultValue={sp.ad ?? ""} className="h-9 w-auto">
+            <option value="">All ad accounts</option>
+            {opts.adAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </Select>
           <Select name="sort" defaultValue={sp.sort ?? "name"} className="h-9 w-auto" aria-label="Sort">
             <option value="name">Sort: Brand A–Z</option>
@@ -150,7 +178,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                     <td className="font-mono text-[12.5px] text-ink-2">{r.clientCode}</td>
                     <td>
                       <Link href={`/clients/${r.id}`} className="font-medium text-ink hover:text-brand-700">{r.name}</Link>
-                      {r.industry && <div className="text-[11.5px] text-muted">{r.industry}</div>}
+                      {(r.industry || r.category) && <div className="text-[11.5px] text-muted">{[r.category, r.industry, r.subIndustry].filter(Boolean).join(" · ")}</div>}
                     </td>
                     <td><Badge tone={STATUS_TONE[r.status]} dot>{CLIENT_STATUS_LABEL[r.status]}</Badge></td>
                     <td>{r.package?.name ?? <span className="text-subtle">—</span>}</td>
@@ -184,6 +212,16 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     </>
   );
 }
+
+const BREAKDOWN_ICON: Record<PortfolioBreakdown, typeof Layers> = {
+  package: Layers,
+  category: Shapes,
+  industry: Briefcase,
+  subIndustry: Tag,
+  consultant: UserRound,
+  adsStrategist: Users,
+  adAccount: Megaphone,
+};
 
 function PersonCell({ p }: { p: { id: string; name: string; photoId?: string | null } | null }) {
   if (!p) return <span className="text-subtle">—</span>;

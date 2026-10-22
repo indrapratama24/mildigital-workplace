@@ -38,7 +38,7 @@ async function reset() {
     "DelegationAssignment", "Request", "StoredFile", "LeaveBalance", "RequestType", "Holiday", "HolidayCalendar",
     "EmployeePolicyAssignment", "EmployeeLevelAssignment", "ReportingRelationship", "EmployeeTeamMembership", "Team",
     "EmployeeLevel", "PolicyVersion", "Policy", "Session", "Employee", "Department", "User", "SystemSetting",
-    "PermissionGrant", "ClientTeamAssignment", "ClientStatusHistory", "ClientEngagementPackage", "ClientEngagement", "ClientCodeAlias", "ClientBrand",
+    "PermissionGrant", "ClientTeamAssignment", "ClientStatusHistory", "ClientEngagementPackage", "ClientEngagement", "ClientCodeAlias", "ClientBrandAdAccount", "ClientBrand", "ClientSubIndustry", "ClientIndustry",
     "ClientOrganization", "RegulationAcknowledgement", "RegulationVersion", "CompanyRegulation", "AnnouncementAudience", "Announcement", "EmployeeRecognition",
   ];
   await db.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"${t}"`).join(", ")} CASCADE`);
@@ -77,7 +77,7 @@ async function main() {
   for (const p of people) {
     const user = await db.user.create({ data: { email: p.email, passwordHash: pw, role: p.role } });
     const emp = await db.employee.create({
-      data: { employeeCode: p.code, fullName: p.name, email: p.email, jobTitle: p.title, departmentId: depts[p.dept].id, startDate: d(p.start), userId: user.id },
+      data: { employeeCode: p.code, fullName: p.name, email: p.email, jobTitle: p.title, departmentId: depts[p.dept].id, startDate: d(p.start), fullTimeSince: d(p.start), userId: user.id },
     });
     ids[p.key] = emp.id;
     await db.employee.update({ where: { id: emp.id }, data: { nickname: p.name.split(" ")[0] } });
@@ -98,6 +98,9 @@ async function main() {
   await db.team.update({ where: { id: teams.CREA.id }, data: { leadId: ids.rina, backupApproverId: ids.sari } });
   await db.team.update({ where: { id: teams.PPL.id }, data: { leadId: ids.sari, backupApproverId: ids.indra } });
   await db.systemSetting.create({ data: { key: "hrFallbackEmployeeId", value: ids.sari } });
+  // Final approval after the leader: Indra (CEO) for leave requests
+  await db.systemSetting.create({ data: { key: "finalApproverEmployeeId", value: ids.indra } });
+  await db.systemSetting.create({ data: { key: "finalApprovalRequestTypes", value: (await db.requestType.findMany({ where: { category: "LEAVE" }, select: { id: true } })).map((t) => t.id) } });
 
   for (const id of Object.values(ids)) await db.leaveBalance.create({ data: { employeeId: id, requestTypeId: types.ANNUAL, year: 2026, entitledDays: 12 } });
 
@@ -397,20 +400,22 @@ async function main() {
 
     // Fictional demo brands
     const pk = Object.fromEntries((await db.clientPackage.findMany()).map((p) => [p.name, p.id]));
+    const cat = Object.fromEntries((await db.clientCategory.findMany()).map((c) => [c.name, c.id]));
+    const tax = (category: string, industryName: string, subIndustryName?: string, adAccounts: string[] = []) => ({ categoryId: cat[category], industryName, subIndustryName, adAccounts });
     const team = (primary: string | null, secondary: string | null, as: string[], additional: string[] = []) => ({ primary: primary && ids[primary], secondary: secondary && ids[secondary], additional: additional.map((k) => ids[k]), adsStrategists: as.map((k) => ids[k]) });
     const brands: Parameters<typeof createClient>[1][] = [
-      { name: "Kopi Senja", organizationName: "PT Senja Boga (demo)", industry: "F&B", status: "ACTIVE", dateStart: "2023-02-01", packageId: pk.Advance, team: team("rizky", "ayu", ["fajar", "agus"]), websiteUrl: "https://example.com/kopisenja", picName: "Demo PIC", picContact: "+62 800 0000 001" },
-      { name: "Senja Bakery", organizationName: "PT Senja Boga (demo)", industry: "F&B", status: "ACTIVE", dateStart: "2025-08-15", packageId: pk.Regular, team: team("ayu", null, ["fajar"]) },
-      { name: "Batik Lestari", industry: "Fashion", status: "ACTIVE", dateStart: "2024-04-01", packageId: pk.Regular, team: team("hendra", "agus", ["nadia"]) },
-      { name: "Nusa Skin", industry: "Beauty", status: "ACTIVE", dateStart: "2026-10-01", packageId: pk.Advance, team: team("rizky", null, ["ayu", "fajar", "lina"], ["dimas"]) },
-      { name: "Rumah Teduh Property", industry: "Property", status: "ACTIVE", dateStart: "2022-09-01", packageId: pk.Basic, team: team("budi", "dimas", []) },
-      { name: "Gerak Sehat", industry: "Health", status: "FREEZE", dateStart: "2024-01-08", statusEffectiveDate: "2026-09-01", packageId: pk.Regular, team: team("ayu", null, ["fajar"]) },
-      { name: "Toko Kayu Jati", industry: "Home & Living", status: "INACTIVE", dateStart: "2023-05-01", dateOff: "2025-12-31", packageId: pk.Basic, team: team("hendra", null, []) },
+      { name: "Kopi Senja", organizationName: "PT Senja Boga (demo)", ...tax("F&B", "Coffee Shop", "Specialty Coffee", ["Meta Regular", "GMV Max TikTok"]), status: "ACTIVE", dateStart: "2023-02-01", packageId: pk.Advance, team: team("rizky", "ayu", ["fajar", "agus"]), websiteUrl: "https://example.com/kopisenja", picName: "Demo PIC", picPhone: "+62 800 0000 001", picEmail: "pic@example.com" },
+      { name: "Senja Bakery", organizationName: "PT Senja Boga (demo)", ...tax("F&B", "Bakery", undefined, ["Meta Regular"]), status: "ACTIVE", dateStart: "2025-08-15", packageId: pk.Regular, team: team("ayu", null, ["fajar"]) },
+      { name: "Batik Lestari", ...tax("Retail-Fashion", "Apparel", "Women's Apparel", ["Meta CPAS Shopee", "Iklanku Shopee"]), status: "ACTIVE", dateStart: "2024-04-01", packageId: pk.Regular, team: team("hendra", "agus", ["nadia"]) },
+      { name: "Nusa Skin", ...tax("Retail-Non Fashion", "Beauty", "Skincare", ["Meta Regular", "TTAM", "GMV Max TikTok"]), status: "ACTIVE", dateStart: "2026-10-01", packageId: pk.Advance, team: team("rizky", null, ["ayu", "fajar", "lina"], ["dimas"]) },
+      { name: "Rumah Teduh Property", ...tax("B2B & Services", "Property", undefined, ["Meta Regular"]), status: "ACTIVE", dateStart: "2022-09-01", packageId: pk.Basic, team: team("budi", "dimas", []) },
+      { name: "Gerak Sehat", ...tax("B2B & Services", "Health", "Fitness Studio", ["Meta Regular"]), status: "FREEZE", dateStart: "2024-01-08", statusEffectiveDate: "2026-09-01", packageId: pk.Regular, team: team("ayu", null, ["fajar"]) },
+      { name: "Toko Kayu Jati", ...tax("Retail-Non Fashion", "Home & Living", "Furniture", ["Iklanku Shopee"]), status: "INACTIVE", dateStart: "2023-05-01", dateOff: "2025-12-31", packageId: pk.Basic, team: team("hendra", null, []) },
     ];
     const created: Record<string, string> = {};
     for (const b of brands) created[b.name] = (await createClient(budi, b)).id;
     // Reactivated client: inactive in early 2026, back from August
-    const back = await createClient(budi, { name: "Lumbung Tani", industry: "Agriculture", status: "INACTIVE", dateStart: "2022-03-01", dateOff: "2026-01-31", packageId: pk.Basic, team: team("agus", null, ["nadia"]) });
+    const back = await createClient(budi, { name: "Lumbung Tani", ...tax("B2B & Services", "Agriculture"), status: "INACTIVE", dateStart: "2022-03-01", dateOff: "2026-01-31", packageId: pk.Basic, team: team("agus", null, ["nadia"]) });
     await changeClientStatus(budi, back.id, { status: "ACTIVE", effectiveDate: "2026-08-01", reason: "Contract renewed (demo)" });
   }
 

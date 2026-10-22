@@ -4,7 +4,8 @@ import { Paperclip, Pencil } from "lucide-react";
 import { db } from "@/server/db";
 import { requirePageUser } from "@/server/auth/guard";
 import { can } from "@/server/authz";
-import { getRequestDetail } from "@/server/services/requests";
+import { getRequestDetail, leaveBalance } from "@/server/services/requests";
+import { unpaidDays } from "@/lib/engine/leave";
 import { DomainError } from "@/server/errors";
 import { formatDateRange, formatDateTime, toISO, formatDate } from "@/lib/dates";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -41,6 +42,10 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     ? await db.employee.findMany({ where: { isActive: true, id: { not: r.employeeId }, user: { role: { in: ["LEADER", "HR", "SUPER_ADMIN"] } } }, select: { id: true, fullName: true }, orderBy: { fullName: "asc" } })
     : [];
   const declined = r.delegations.filter((d) => d.status === "DECLINED");
+  // Balance at the leave date (excluding this request) — the part not covered is unpaid leave.
+  const open = ["DRAFT", "PENDING_DELEGATE", "PENDING_LEADER", "CHANGES_REQUESTED"].includes(r.status);
+  const bal = open && r.requestType.deductsBalance ? await leaveBalance(db, r.employeeId, r.requestTypeId, r.startDate.getUTCFullYear(), r.id, toISO(r.startDate)) : null;
+  const unpaid = bal ? unpaidDays(bal.remaining, r.workingDays) : 0;
 
   return (
     <>
@@ -65,11 +70,17 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           {declined.map((d) => d.responseComment).filter(Boolean).join(" · ")} — replace the delegate and resubmit. Every delegate is asked again on resubmission.
         </Notice>
       )}
+      {bal && unpaid > 0 && (
+        <Notice tone="danger" className="mb-5" title={`${unpaid} of ${r.workingDays} day(s) would be unpaid leave`}>
+          {isOwner ? "You" : r.employee.fullName} will have {Math.max(0, bal.remaining)} {r.requestType.name.toLowerCase()} day(s) available on {formatDate(toISO(r.startDate))}
+          {bal.monthlyAccrual ? " (earned 1 per month)" : ""}. The rest is taken as unpaid leave{isOwner ? " — this is likely to be declined; please reconsider." : ". Please consider whether to approve."}
+        </Notice>
+      )}
       <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
         <div className="space-y-5">
           {myStep && (
             <Card className="border-brand-200">
-              <CardHeader title="Your decision" description={myStep.kind === "HR" ? "HR exception approval" : "Leader approval — you're confirming entitlement and team coverage."} />
+              <CardHeader title="Your decision" description={myStep.kind === "FINAL" ? "Final approval after the leader." : myStep.kind === "HR" ? "HR exception approval" : "Leader approval — you're confirming entitlement and team coverage."} />
               <CardBody>
                 <DecisionPanel stepId={myStep.id} kind={myStep.kind} />
               </CardBody>

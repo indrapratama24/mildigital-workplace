@@ -36,6 +36,7 @@ import { inboxFor } from "@/server/services/approvals";
 import { todayRecord } from "@/server/services/attendance";
 import { eventsForEmployee } from "@/server/services/events";
 import { announcementsFor, pendingAcknowledgements, recognitionFeed } from "@/server/services/workplace";
+import { yearEndStatus } from "@/server/services/requests";
 import { getSettings } from "@/server/services/settings";
 import { addDays, addMonths, currentMonthJakarta, formatDate, formatDateLong, formatDateRange, formatDateTime, formatMonth, formatTimeRange, formatWeekdayShort, monthParam, todayJakarta, toISO } from "@/lib/dates";
 import { isEnabled } from "@/lib/features";
@@ -80,10 +81,10 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const next = addMonths(cur.year, cur.month, 1);
   const today = todayJakarta();
   const isManager = can(me, "team.view");
-  const [thisMonth, nextMonth, approvals, delegations, myRequests, revisions, rec, company, events, news, acks, recognition, settings] = await Promise.all([
+  const [thisMonth, nextMonth, approvals, delegations, myRequests, revisions, rec, company, events, news, acks, recognition, settings, yearEnd] = await Promise.all([
     getPlannerData(me, me.employeeId, cur.year, cur.month),
     getPlannerData(me, me.employeeId, next.year, next.month),
-    inboxFor(me.employeeId, ["LEADER", "HR"]),
+    inboxFor(me.employeeId, ["LEADER", "HR", "FINAL"]),
     inboxFor(me.employeeId, ["DELEGATE"]),
     db.request.findMany({ where: { employeeId: me.employeeId, status: { in: ["PENDING_DELEGATE", "PENDING_LEADER", "CHANGES_REQUESTED", "DRAFT"] } }, include: { requestType: true }, orderBy: { startDate: "asc" }, take: 5 }),
     db.scheduleRevision.findMany({ where: { employeeId: me.employeeId, status: { in: ["PENDING", "CHANGES_REQUESTED"] } }, include: { schedule: { select: { year: true, month: true } } }, take: 5 }),
@@ -94,6 +95,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     pendingAcknowledgements(me.employeeId),
     recognitionFeed(me),
     getSettings(),
+    yearEndStatus(me.employeeId),
   ]);
 
   // ── My work today ──
@@ -137,6 +139,8 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     if (e.attendanceRequirement === "MANDATORY" && e.wfoRequirement === "IN_OFFICE_REQUIRED" && d && modeOf(d) === "WFH")
       actions.push({ key: `ev${e.id}`, icon: ShieldAlert, title: `WFO conflict: ${e.title}`, detail: `${formatDate(toISO(e.localDate))} is planned as WFH — in-office attendance required`, href: `/calendar?month=${toISO(e.localDate).slice(0, 7)}`, tone: "danger" });
   }
+  if (yearEnd?.open && !yearEnd.choice && yearEnd.tradable > 0)
+    actions.push({ key: "yearend", icon: PlaneTakeoff, title: `Choose what to do with ${yearEnd.tradable} leftover leave day(s)`, detail: `Withdraw as cash or save for next year — by ${formatDate(yearEnd.closesOn)}`, href: "/requests", tone: "warning" });
   for (const r of acks) actions.push({ key: `ack${r.id}`, icon: FileSignature, title: `Acknowledge: ${r.title}`, detail: "Company regulation update", href: `/company/regulations/${r.id}`, tone: "warning" });
   const order = { danger: 0, warning: 1, brand: 2, neutral: 3 };
   actions.sort((a, b) => order[a.tone] - order[b.tone]);

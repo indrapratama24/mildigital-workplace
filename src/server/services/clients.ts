@@ -71,13 +71,19 @@ export async function removePackage(actor: CurrentUser, id: string) {
 export interface ClientInfoInput {
   name: string;
   organizationName?: string | null;
-  industry?: string | null;
+  /** Brand classification: category id, then industry / sub-industry by name (created when new). */
+  categoryId?: string | null;
+  industryName?: string | null;
+  subIndustryName?: string | null;
+  /** Ad account types handled, by name (unknown names are added to the list). */
+  adAccounts?: string[];
   description?: string | null;
   websiteUrl?: string | null;
   instagramUrl?: string | null;
   tiktokUrl?: string | null;
   picName?: string | null;
-  picContact?: string | null;
+  picPhone?: string | null;
+  picEmail?: string | null;
   internalNotes?: string | null;
 }
 
@@ -102,6 +108,8 @@ export interface UpdateClientInput extends ClientInfoInput {
   waivePrimary?: boolean;
   waiverReason?: string | null;
   status?: { status: ClientStatusT; effectiveDate?: ISODate | null; dateOff?: ISODate | null; reason?: string | null } | null;
+  /** Date the team change (new PIC / addition / removal) takes effect. Defaults to today; can't be in the future. */
+  teamEffectiveDate?: ISODate | null;
 }
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
@@ -122,17 +130,20 @@ function validateInfo(i: ClientInfoInput) {
   checkUrl("Website URL", i.websiteUrl);
   checkUrl("Instagram URL", i.instagramUrl);
   checkUrl("TikTok URL", i.tiktokUrl);
+  if (i.picPhone?.trim() && !/^\+?[0-9][0-9\s()-]{6,20}$/.test(i.picPhone.trim())) throw invalid("PIC phone looks invalid (digits, spaces, + and - only).");
+  if (i.picEmail?.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(i.picEmail.trim())) throw invalid("PIC email is invalid.");
+  if (i.subIndustryName?.trim() && !i.industryName?.trim()) throw invalid("Choose an industry before a sub-industry.");
+  if ((i.adAccounts?.length ?? 0) > 20) throw invalid("Too many ad accounts.");
 }
 
 function infoData(i: ClientInfoInput, canSensitive: boolean) {
   return {
     name: i.name.trim(),
-    industry: clean(i.industry),
     description: clean(i.description),
     websiteUrl: clean(i.websiteUrl),
     instagramUrl: clean(i.instagramUrl),
     tiktokUrl: clean(i.tiktokUrl),
-    ...(canSensitive ? { picName: clean(i.picName), picContact: clean(i.picContact), internalNotes: clean(i.internalNotes) } : {}),
+    ...(canSensitive ? { picName: clean(i.picName), picPhone: clean(i.picPhone), picEmail: clean(i.picEmail)?.toLowerCase() ?? null, internalNotes: clean(i.internalNotes) } : {}),
   };
 }
 
@@ -141,6 +152,36 @@ async function organizationId(tx: Tx, name: string | null | undefined) {
   if (!n) return null;
   const org = await tx.clientOrganization.upsert({ where: { name: n }, create: { name: n }, update: {} });
   return org.id;
+}
+
+/** Finds or creates the industry (within the category) and sub-industry so they can be reused by other brands. */
+async function resolveTaxonomy(tx: Tx, i: ClientInfoInput) {
+  const categoryId = i.categoryId || null;
+  if (categoryId && !(await tx.clientCategory.findUnique({ where: { id: categoryId } }))) throw invalid("Unknown category.");
+  const industryName = clean(i.industryName)?.slice(0, 80);
+  if (!industryName) return { categoryId, industryId: null, subIndustryId: null };
+  const industry =
+    (await tx.clientIndustry.findFirst({ where: { categoryId, name: { equals: industryName, mode: "insensitive" } } })) ??
+    (await tx.clientIndustry.create({ data: { name: industryName, categoryId } }));
+  const subName = clean(i.subIndustryName)?.slice(0, 80);
+  if (!subName) return { categoryId, industryId: industry.id, subIndustryId: null };
+  const sub =
+    (await tx.clientSubIndustry.findFirst({ where: { industryId: industry.id, name: { equals: subName, mode: "insensitive" } } })) ??
+    (await tx.clientSubIndustry.create({ data: { name: subName, industryId: industry.id } }));
+  return { categoryId, industryId: industry.id, subIndustryId: sub.id };
+}
+
+/** Replaces the brand's ad account types; new names are added to the shared list. */
+async function syncAdAccounts(tx: Tx, brandId: string, names: string[] | undefined) {
+  if (names === undefined) return;
+  const wanted = [...new Map(names.map((n) => n.trim().slice(0, 60)).filter(Boolean).map((n) => [n.toLowerCase(), n])).values()];
+  const ids: string[] = [];
+  for (const n of wanted) {
+    const t = (await tx.clientAdAccountType.findFirst({ where: { name: { equals: n, mode: "insensitive" } } })) ?? (await tx.clientAdAccountType.create({ data: { name: n, sortOrder: 100 } }));
+    ids.push(t.id);
+  }
+  await tx.clientBrandAdAccount.deleteMany({ where: { brandId, typeId: { notIn: ids } } });
+  await tx.clientBrandAdAccount.createMany({ data: ids.map((typeId) => ({ brandId, typeId })), skipDuplicates: true });
 }
 
 async function assertCodeFree(tx: Tx, code: string, exceptBrandId?: string) {
@@ -178,8 +219,11 @@ async function assertPackage(tx: Tx, packageId: string, allowInactiveId?: string
 /** Row lock on the brand so concurrent edits (e.g. two people adding Ads Strategists) serialise. */
 const lockBrand = (tx: Tx, id: string) => tx.$queryRaw`SELECT id FROM "ClientBrand" WHERE id = ${id} FOR UPDATE`;
 
-/** Applies the desired team: unchanged rows stay, removed/changed rows are closed, new rows are inserted. */
-async function syncTeam(tx: Tx, actor: CurrentUser, brandId: string, team: TeamInput, today: ISODate) {
+/**
+ * Applies the desired team from `from` (the change date): unchanged rows stay, removed/changed rows end the
+ * day before, new rows start that day.
+ */
+async function syncTeam(tx: Tx, actor: CurrentUser, brandId: string, team: TeamInput, from: ISODate) {
   const wanted = teamRows(team);
   const current = await tx.clientTeamAssignment.findMany({ where: { brandId, effectiveTo: null } });
   const keep = new Set<string>();
@@ -190,8 +234,8 @@ async function syncTeam(tx: Tx, actor: CurrentUser, brandId: string, team: TeamI
       keep.add(row.employeeId);
       continue;
     }
-    const from = toISO(row.effectiveFrom);
-    await tx.clientTeamAssignment.update({ where: { id: row.id }, data: { effectiveTo: fromISO(from >= today ? from : addDays(today, -1)), endedById: actor.employeeId } });
+    const started = toISO(row.effectiveFrom);
+    await tx.clientTeamAssignment.update({ where: { id: row.id }, data: { effectiveTo: fromISO(started >= from ? started : addDays(from, -1)), endedById: actor.employeeId } });
     if (!w) changes.push({ employeeId: row.employeeId, from: row.role, to: null });
   }
   const newIds = wanted.filter((w) => !keep.has(w.employeeId)).map((w) => w.employeeId);
@@ -199,7 +243,7 @@ async function syncTeam(tx: Tx, actor: CurrentUser, brandId: string, team: TeamI
   for (const w of wanted) {
     if (keep.has(w.employeeId)) continue;
     const prev = current.find((c) => c.employeeId === w.employeeId);
-    await tx.clientTeamAssignment.create({ data: { brandId, employeeId: w.employeeId, role: w.role, effectiveFrom: fromISO(today), assignedById: actor.employeeId } });
+    await tx.clientTeamAssignment.create({ data: { brandId, employeeId: w.employeeId, role: w.role, effectiveFrom: fromISO(from), assignedById: actor.employeeId } });
     changes.push({ employeeId: w.employeeId, from: prev?.role ?? null, to: w.role });
   }
   return changes;
@@ -234,6 +278,7 @@ export async function createClient(actor: CurrentUser, input: CreateClientInput)
         clientCode: code,
         organizationId: await organizationId(tx, input.organizationName),
         ...infoData(input, true),
+        ...(await resolveTaxonomy(tx, input)),
         status: input.status,
         dateStart: fromISO(input.dateStart),
         dateOff: input.status === "INACTIVE" && dateOff ? fromISO(dateOff) : null,
@@ -264,6 +309,7 @@ export async function createClient(actor: CurrentUser, input: CreateClientInput)
     await tx.clientEngagementPackage.create({
       data: { engagementId: engagement.id, packageId: input.packageId, effectiveFrom: fromISO(input.dateStart), effectiveTo: input.status === "INACTIVE" ? fromISO(dateOff!) : null, changedById: actor.employeeId },
     });
+    await syncAdAccounts(tx, brand.id, input.adAccounts ?? []);
     const assignFrom = input.dateStart > today ? input.dateStart : today;
     await assertEmployees(tx, teamRows(input.team).map((r) => r.employeeId));
     for (const r of teamRows(input.team))
@@ -310,6 +356,7 @@ export async function updateClient(actor: CurrentUser, id: string, input: Update
         clientCode: code,
         organizationId: await organizationId(tx, input.organizationName),
         ...infoData(input, canSensitive),
+        ...(await resolveTaxonomy(tx, input)),
         dateStart: fromISO(input.dateStart),
         primaryConsultantWaived: waived,
         waiverReason: waived ? clean(input.waiverReason) : null,
@@ -318,7 +365,11 @@ export async function updateClient(actor: CurrentUser, id: string, input: Update
 
     if (input.status && input.status.status !== before.status) await applyStatusChange(tx, actor, brand.id, input.status, input.packageId);
     await changePackage(tx, actor, id, input.packageId, today);
-    const teamChanges = await syncTeam(tx, actor, id, input.team, today);
+    await syncAdAccounts(tx, id, input.adAccounts);
+    const teamFrom = input.teamEffectiveDate || today;
+    if (!isValidISO(teamFrom) || teamFrom > today) throw invalid("The team change date can't be in the future.");
+    if (teamFrom < input.dateStart) throw invalid("The team change date can't be before Date START.");
+    const teamChanges = await syncTeam(tx, actor, id, input.team, teamFrom);
     await audit(tx, { actorUserId: actor.userId, action: "client.update", entityType: "ClientBrand", entityId: id, before, after: brand, metadata: { teamChanges } });
     return brand;
   });
@@ -462,6 +513,10 @@ const teamInclude = {
   engagements: { orderBy: { startDate: "desc" }, take: 1, include: { packages: { orderBy: { effectiveFrom: "desc" }, take: 1, include: { package: true } } } },
   statusHistory: { orderBy: { effectiveFrom: "asc" } },
   organization: true,
+  category: { select: { id: true, name: true } },
+  industry: { select: { id: true, name: true } },
+  subIndustry: { select: { id: true, name: true } },
+  adAccounts: { include: { type: { select: { id: true, name: true, sortOrder: true } } } },
 } satisfies Prisma.ClientBrandInclude;
 
 type BrandWithTeam = Prisma.ClientBrandGetPayload<{ include: typeof teamInclude }>;
@@ -481,7 +536,12 @@ function shape(b: BrandWithTeam, today: ISODate) {
     status: b.status as ClientStatusT,
     dateStart,
     dateOff,
-    industry: b.industry,
+    category: b.category?.name ?? null,
+    categoryId: b.category?.id ?? null,
+    industry: b.industry?.name ?? null,
+    industryId: b.industry?.id ?? null,
+    subIndustry: b.subIndustry?.name ?? null,
+    adAccounts: b.adAccounts.map((a) => a.type).sort((x, y) => x.sortOrder - y.sortOrder || x.name.localeCompare(y.name)).map((t) => t.name),
     package: pkg ? { id: pkg.id, name: pkg.name, isActive: pkg.isActive } : null,
     consultant1: people("CONSULTANT_PRIMARY")[0] ?? null,
     consultant2: people("CONSULTANT_SECONDARY")[0] ?? null,
@@ -498,7 +558,9 @@ export interface ClientFilters {
   packageId?: string;
   consultantId?: string;
   asId?: string;
-  industry?: string;
+  categoryId?: string;
+  industryId?: string;
+  adAccountId?: string;
   sort?: "name" | "start_desc" | "start_asc" | "period_desc" | "period_asc" | "code";
   page?: number;
   pageSize?: number;
@@ -511,7 +573,9 @@ export async function listClients(_viewer: CurrentUser, f: ClientFilters = {}) {
     where: {
       archivedAt: null,
       ...(f.status && f.status !== "ALL" ? { status: f.status } : {}),
-      ...(f.industry ? { industry: f.industry } : {}),
+      ...(f.categoryId ? { categoryId: f.categoryId } : {}),
+      ...(f.industryId ? { industryId: f.industryId } : {}),
+      ...(f.adAccountId ? { adAccounts: { some: { typeId: f.adAccountId } } } : {}),
       ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { clientCode: { contains: q, mode: "insensitive" } }] } : {}),
     },
     include: teamInclude,
@@ -538,16 +602,18 @@ export async function listClients(_viewer: CurrentUser, f: ClientFilters = {}) {
 }
 
 export async function clientFilterOptions() {
-  const [packages, industries, people] = await Promise.all([
+  const [packages, taxonomy, adAccounts, people] = await Promise.all([
     listPackages({ includeInactive: true }),
-    db.clientBrand.findMany({ where: { archivedAt: null, industry: { not: null } }, distinct: ["industry"], select: { industry: true }, orderBy: { industry: "asc" } }),
+    clientTaxonomy(),
+    db.clientAdAccountType.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     db.clientTeamAssignment.findMany({ where: { effectiveTo: null }, distinct: ["employeeId", "role"], select: { role: true, employee: { select: { id: true, fullName: true } } } }),
   ]);
   const uniq = (roles: ClientRole[]) =>
     [...new Map(people.filter((p) => roles.includes(p.role)).map((p) => [p.employee.id, p.employee])).values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
   return {
     packages,
-    industries: industries.map((i) => i.industry!).filter(Boolean),
+    ...taxonomy,
+    adAccounts,
     consultants: uniq(["CONSULTANT_PRIMARY", "CONSULTANT_SECONDARY", "CONSULTANT_ADDITIONAL"]),
     adsStrategists: uniq(["ADS_STRATEGIST"]),
   };
@@ -567,7 +633,7 @@ export async function getClient(viewer: CurrentUser, id: string) {
   const sensitive = await canSeeClientSensitive(viewer, id);
   const [engagements, assignmentHistory] = await Promise.all([
     db.clientEngagement.findMany({ where: { brandId: id }, orderBy: { startDate: "asc" }, include: { packages: { orderBy: { effectiveFrom: "asc" }, include: { package: true } } } }),
-    db.clientTeamAssignment.findMany({ where: { brandId: id }, orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }], include: { employee: { select: { id: true, fullName: true } } } }),
+    db.clientTeamAssignment.findMany({ where: { brandId: id }, orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }], include: { employee: { select: { id: true, fullName: true, email: true, employeeCode: true } } } }),
   ]);
   return {
     ...shape(b as unknown as BrandWithTeam, today),
@@ -576,7 +642,8 @@ export async function getClient(viewer: CurrentUser, id: string) {
     instagramUrl: b.instagramUrl,
     tiktokUrl: b.tiktokUrl,
     picName: sensitive ? b.picName : null,
-    picContact: sensitive ? b.picContact : null,
+    picPhone: sensitive ? b.picPhone : null,
+    picEmail: sensitive ? b.picEmail : null,
     internalNotes: sensitive ? b.internalNotes : null,
     sensitiveVisible: sensitive,
     primaryConsultantWaived: b.primaryConsultantWaived,
@@ -618,30 +685,153 @@ export async function assignableEmployees() {
   return db.employee.findMany({ where: { isActive: true }, select: { id: true, fullName: true, jobTitle: true }, orderBy: { fullName: "asc" } });
 }
 
-export function clientsCsv(rows: ClientRow[]) {
-  const esc = (v: unknown) => {
-    const s = v === null || v === undefined ? "" : String(v);
-    return /[",\n]/.test(s) || /^[=+\-@]/.test(s) ? `"${s.replace(/^([=+\-@])/, "'$1").replace(/"/g, '""')}"` : s;
+/** CSV columns shared by export, the import template and the importer (extra columns are ignored on import). */
+export const CLIENT_CSV_COLUMNS = [
+  "client_id",
+  "brand_name",
+  "client_organization",
+  "status",
+  "date_start",
+  "date_off",
+  "package",
+  "category",
+  "industry",
+  "sub_industry",
+  "ad_accounts",
+  "consultant_1",
+  "consultant_2",
+  "additional_consultants",
+  "ads_strategists",
+  "website_url",
+  "instagram_url",
+  "tiktok_url",
+  "pic_name",
+  "pic_phone",
+  "pic_email",
+  "brand_description",
+  "internal_notes",
+] as const;
+
+export const csvCell = (v: unknown) => {
+  const s = v === null || v === undefined ? "" : String(v);
+  const safe = /^[=+\-@]/.test(s) ? `'${s}` : s; // spreadsheet formula injection
+  return /[",\n;]/.test(safe) || safe !== s ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
+
+/** Export: people are written as work emails so the file can be re-imported. PIC data only when allowed. */
+export async function clientsExportCsv(viewer: CurrentUser, rows: ClientRow[]) {
+  const ids = rows.map((r) => r.id);
+  const [extra, people] = await Promise.all([
+    db.clientBrand.findMany({ where: { id: { in: ids } }, select: { id: true, description: true, websiteUrl: true, instagramUrl: true, tiktokUrl: true, picName: true, picPhone: true, picEmail: true, internalNotes: true } }),
+    db.employee.findMany({ select: { id: true, email: true } }),
+  ]);
+  const sensitiveAll = can(viewer, "client.sensitive");
+  const mine = new Set((await db.clientTeamAssignment.findMany({ where: { employeeId: viewer.employeeId, effectiveTo: null }, select: { brandId: true } })).map((a) => a.brandId));
+  const email = new Map(people.map((p) => [p.id, p.email]));
+  const lines = rows.map((r) => {
+    const x = extra.find((e) => e.id === r.id)!;
+    const sens = sensitiveAll || mine.has(r.id);
+    const values: Record<(typeof CLIENT_CSV_COLUMNS)[number], unknown> = {
+      client_id: r.clientCode,
+      brand_name: r.name,
+      client_organization: r.organization,
+      status: r.status,
+      date_start: r.dateStart,
+      date_off: r.dateOff,
+      package: r.package?.name,
+      category: r.category,
+      industry: r.industry,
+      sub_industry: r.subIndustry,
+      ad_accounts: r.adAccounts.join("; "),
+      consultant_1: r.consultant1 && email.get(r.consultant1.id),
+      consultant_2: r.consultant2 && email.get(r.consultant2.id),
+      additional_consultants: r.additional.map((p) => email.get(p.id)).join("; "),
+      ads_strategists: r.adsStrategists.map((p) => email.get(p.id)).join("; "),
+      website_url: x.websiteUrl,
+      instagram_url: x.instagramUrl,
+      tiktok_url: x.tiktokUrl,
+      pic_name: sens ? x.picName : "",
+      pic_phone: sens ? x.picPhone : "",
+      pic_email: sens ? x.picEmail : "",
+      brand_description: x.description,
+      internal_notes: sens ? x.internalNotes : "",
+    };
+    return [...CLIENT_CSV_COLUMNS.map((c) => csvCell(values[c])), csvCell(r.period.label)].join(",");
+  });
+  return [[...CLIENT_CSV_COLUMNS, "period"].join(","), ...lines].join("\n");
+}
+
+// ───────────────────────────── Taxonomy & ad accounts ─────────────────────────────
+
+export async function clientTaxonomy() {
+  const [categories, industries] = await Promise.all([
+    db.clientCategory.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+    db.clientIndustry.findMany({ include: { subIndustries: { orderBy: { name: "asc" } }, _count: { select: { brands: true } } }, orderBy: { name: "asc" } }),
+  ]);
+  return {
+    categories: categories.map((c) => ({ id: c.id, name: c.name, isActive: c.isActive, sortOrder: c.sortOrder })),
+    industries: industries.map((i) => ({ id: i.id, name: i.name, categoryId: i.categoryId, brands: i._count.brands, subIndustries: i.subIndustries.map((x) => ({ id: x.id, name: x.name })) })),
   };
-  const head = ["Client ID", "Brand Name", "Organization", "Status", "Package", "Industry", "Date START", "Date OFF", "Period", "Consultant 1", "Consultant 2", "Additional Consultants", "Ads Strategists"];
-  const lines = rows.map((r) =>
-    [
-      r.clientCode,
-      r.name,
-      r.organization,
-      r.status,
-      r.package?.name,
-      r.industry,
-      r.dateStart,
-      r.dateOff,
-      r.period.label,
-      r.consultant1?.name,
-      r.consultant2?.name,
-      r.additional.map((p) => p.name).join("; "),
-      r.adsStrategists.map((p) => p.name).join("; "),
-    ]
-      .map(esc)
-      .join(","),
-  );
-  return [head.join(","), ...lines].join("\n");
+}
+
+const requirePackageAdmin = (u: CurrentUser) => {
+  if (!can(u, "clientPackage.manage")) throw forbidden();
+};
+
+export async function upsertCategory(actor: CurrentUser, input: { id?: string; name: string; isActive: boolean; sortOrder: number }) {
+  requirePackageAdmin(actor);
+  const name = input.name.trim();
+  if (name.length < 2) throw invalid("Category name is required.");
+  return withTx(async (tx) => {
+    const dup = await tx.clientCategory.findFirst({ where: { name: { equals: name, mode: "insensitive" }, NOT: input.id ? { id: input.id } : undefined } });
+    if (dup) throw conflict(`Category “${dup.name}” already exists.`);
+    const data = { name, isActive: input.isActive, sortOrder: input.sortOrder };
+    const saved = input.id ? await tx.clientCategory.update({ where: { id: input.id }, data }) : await tx.clientCategory.create({ data });
+    await audit(tx, { actorUserId: actor.userId, action: input.id ? "client.category.update" : "client.category.create", entityType: "ClientCategory", entityId: saved.id, after: saved });
+    return saved;
+  });
+}
+
+export async function upsertAdAccountType(actor: CurrentUser, input: { id?: string; name: string; isActive: boolean; sortOrder: number }) {
+  requirePackageAdmin(actor);
+  const name = input.name.trim();
+  if (name.length < 2) throw invalid("Ad account name is required.");
+  return withTx(async (tx) => {
+    const dup = await tx.clientAdAccountType.findFirst({ where: { name: { equals: name, mode: "insensitive" }, NOT: input.id ? { id: input.id } : undefined } });
+    if (dup) throw conflict(`“${dup.name}” already exists.`);
+    const data = { name, isActive: input.isActive, sortOrder: input.sortOrder };
+    const saved = input.id ? await tx.clientAdAccountType.update({ where: { id: input.id }, data }) : await tx.clientAdAccountType.create({ data });
+    await audit(tx, { actorUserId: actor.userId, action: input.id ? "client.adaccount.update" : "client.adaccount.create", entityType: "ClientAdAccountType", entityId: saved.id, after: saved });
+    return saved;
+  });
+}
+
+/** Rename or re-file an industry / sub-industry; unused ones can be deleted. */
+export async function updateIndustry(actor: CurrentUser, input: { kind: "industry" | "sub"; id: string; name?: string; categoryId?: string | null; remove?: boolean }) {
+  requirePackageAdmin(actor);
+  return withTx(async (tx) => {
+    if (input.kind === "industry") {
+      const ind = await tx.clientIndustry.findUnique({ where: { id: input.id }, include: { _count: { select: { brands: true, subIndustries: true } } } });
+      if (!ind) throw notFound("Industry");
+      if (input.remove) {
+        if (ind._count.brands || ind._count.subIndustries) throw conflict("This industry is still used by clients or has sub-industries.");
+        await tx.clientIndustry.delete({ where: { id: ind.id } });
+      } else {
+        const name = input.name?.trim() || ind.name;
+        const categoryId = input.categoryId === undefined ? ind.categoryId : input.categoryId;
+        await tx.clientIndustry.update({ where: { id: ind.id }, data: { name, categoryId } });
+        // keep brands in step with the industry's category
+        if (categoryId !== ind.categoryId) await tx.clientBrand.updateMany({ where: { industryId: ind.id }, data: { categoryId } });
+      }
+      await audit(tx, { actorUserId: actor.userId, action: input.remove ? "client.industry.delete" : "client.industry.update", entityType: "ClientIndustry", entityId: ind.id, before: ind, after: input });
+    } else {
+      const sub = await tx.clientSubIndustry.findUnique({ where: { id: input.id }, include: { _count: { select: { brands: true } } } });
+      if (!sub) throw notFound("Sub-industry");
+      if (input.remove) {
+        if (sub._count.brands) throw conflict("This sub-industry is still used by clients.");
+        await tx.clientSubIndustry.delete({ where: { id: sub.id } });
+      } else if (input.name?.trim()) await tx.clientSubIndustry.update({ where: { id: sub.id }, data: { name: input.name.trim() } });
+      await audit(tx, { actorUserId: actor.userId, action: input.remove ? "client.subindustry.delete" : "client.subindustry.update", entityType: "ClientSubIndustry", entityId: sub.id, before: sub, after: input });
+    }
+  });
 }

@@ -121,13 +121,13 @@ In-app notifications for every trigger listed in the brief, with unread counts, 
 
 ## Known limitations (not implemented — nothing below is presented as working)
 
-- **Authentication** is local email + password. No SSO (Google Workspace/OIDC) yet, no self-service password reset or admin "reset password" flow; HR sets an initial password at creation and users can change it under Account. Login throttling is in-memory (per process).
+- **Authentication** is local email + password. No SSO (Google Workspace/OIDC) yet and no self-service “forgot password” email. A Super Admin can reset a password from the person's profile: they set a temporary password (all sessions end) and the person must choose and confirm a new one at next sign-in (`User.mustChangePassword` blocks every page and action until then). Users can change their password under Account. Login throttling is in-memory (per process).
 - **Email** sending: adapter interface only (`none`/`console`). Needs an SMTP/Resend/SES implementation and credentials.
 - **Attendance provider** integration: interface only (`AttendanceProvider`); attendance is manual self check-in + leader/HR verification.
 - **Permissions** are a code-defined matrix (shown read-only in Settings → Security); roles are assignable and selected permissions can be granted per user (Settings → Roles & access), but the matrix itself isn't editable at runtime.
 - **Quarterly evaluation**: the period is configurable and the engine has `aggregatePeriod`, but dashboards evaluate and display monthly figures only.
 - **WFH carry-over** flag is stored on the policy but not applied in calculations.
-- **Leave balances**: fixed yearly entitlement + manual adjustment; no accrual, expiry or carry-over. Approved leave can't be cancelled by the employee (HR correction / new request needed).
+- **Leave balances**: yearly entitlement + manual adjustment. Request types can accrue monthly (`monthlyAccrual`: entitlement ÷ 12 at the start of each month from `Employee.fullTimeSince`) and be limited to employment statuses (`eligibleStatuses`; Annual Leave = Permanent). The balance is evaluated at the leave's start date (e.g. full-time since October → 1 day in October, 3 by December). Requests beyond the balance are allowed; the excess is flagged as unpaid leave to the employee (form) and the approver (request page). No expiry or carry-over. Approved leave can't be cancelled by the employee (HR correction / new request needed).
 - **Approval chain** is fixed (peer → leader → optional HR exception step); configurable per type/policy but there is no visual workflow designer.
 - **Team memberships**: the model supports multiple/secondary memberships; the UI manages the primary team only.
 - **Holidays**: seeded 2026 dates must be verified against the official SKB; lunar-calendar 2027 holidays must be imported when published.
@@ -237,6 +237,14 @@ Scope = All / one department / one team; an event is “within scope” when eve
 
 **Access**: everyone sees brand info, status, package and team; PIC contact & internal notes only with `client.sensitive` or while assigned to the client; create/edit/status/assign/archive need `client.manage`; CSV export (`/api/clients/export`, audited, formula-injection safe) needs `client.export`; packages & rules need `clientPackage.manage`. Archive (soft delete) is for mistaken records only.
 
+**Team change date**: when the team changes on edit, a "Team change effective from" date (≤ today, ≥ Date START) is asked; new roles start that day and removed ones end the day before.
+
+**Portfolio highlights**: the breakdown charts (package, category, industry, sub-industry, Consultant 1, Ads Strategist, ad account) are chosen and ordered by client package admins (`clientHighlights` setting, max 6).
+
+**Classification & ad accounts**: `ClientCategory` (Retail-Fashion, Retail-Non Fashion, B2B & Services, F&B — editable) → `ClientIndustry` → `ClientSubIndustry`. Industry/sub-industry names typed on a client are found case-insensitively or created, so they're reused by other brands; admins can rename, re-file or delete unused ones. `ClientAdAccountType` (Meta Regular, Meta CPAS Shopee, Iklanku Shopee, GMV Max TikTok, TTAM, plus any added) linked via `ClientBrandAdAccount`. Client PIC contact is split into `picPhone` and `picEmail` (for future CRM activities).
+
+**Import / export**: `/clients/import` (client.manage) takes the template columns (`/api/clients/template` — same columns as the export): rows without a known Client ID create clients, rows with one update them (status changes are not applied by import — they need an effective date). Every row is validated first (people by work email or employee ID, package/category by name, dates as YYYY-MM-DD or DD/MM/YYYY, team rules); nothing is written while any row has errors.
+
 **Settings**: Packages & client rules (packages are archived instead of deleted once used; Consultant-1 requirement with per-client audited exception; Freeze counting rule).
 
 ### Known limitations (Phase 1)
@@ -246,3 +254,16 @@ Scope = All / one department / one team; an event is “within scope” when eve
 - Announcements have no read receipts or email delivery; regulation acknowledgements are in-app only.
 - Knowledge Hub has no SSO; it's a plain external link.
 - Recognition promotions are derived from level rank increases only (title changes aren't detected).
+
+## Annual leave policy & final approval
+
+- **Eligibility**: Annual Leave is earned by Permanent employees from `Employee.fullTimeSince` (“Leave-eligible since” — the day they passed probation, ~3 months regular / ~6 months trainee; extended probation follows the company's decision). 1 day per month, 12 per year, counted at the leave date.
+- **Notice**: 14 days (request type setting). The form starts new requests at the earliest allowed date.
+- **Rules** (request types with `annualRules`; values in Settings → Leave rules, `annualLeaveRules`): one leave per year up to 10 working days; one more up to 5 with at least 30 days from the other longer leave; after that 1 day per request (single days never use a tier; order of booking doesn't matter). Max 15 calendar days off in a row, counting adjoining public holidays/cuti bersama (ordinary weekends next to the leave don't extend it). At most 20% of active employees on leave (any leave type, approved or pending) on the same date. Problems are listed in the request form and block submission.
+- **Beyond the balance**: allowed, shown as unpaid leave to the employee and the approver.
+- **Final approval** (Settings → Approvals): a `FINAL` workflow step after the leader for the selected request types (default: Indra, all leave types). Skipped when the final approver is the requester or already the leader; “No final approval” switches it off for new requests.
+- **Year-end leftover** (`leaveYearEnd`): from `windowDays` before 31 Dec employees choose to withdraw (cash) or carry over up to `maxDays` (6). Choices are stored in `LeaveYearEndChoice`; HR sees them in Settings → Leave rules with the effective days re-checked against the 31 Dec balance. Carried days are added to next year's balance for leave starting by the end of `carryUntilMonth` (June); unused carried days expire after that. Days not traded expire at year end. Payroll for cash withdrawals is outside the app.
+
+## Team CSV import
+
+`/directory/import` (employee.manage) works like the client import: download the template (`/api/employees/template`, same columns as `/api/employees/export`), upload or paste, check every row, then import. A known `employee_id` updates that person (empty cells keep current values; level and leader changes apply from today; email and join date aren't changed by import); a new ID creates them (leaders may be rows in the same file). Imports can set Employee/Leader roles only. New people have no usable password until a Super Admin sets a temporary one.

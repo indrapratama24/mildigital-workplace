@@ -15,7 +15,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
   const me = await requirePageUser();
   const { tab } = await searchParams;
   const active = tab === "delegations" ? "delegations" : tab === "all" && can(me, "approval.reassign") ? "all" : "approvals";
-  const [approvals, delegations] = await Promise.all([inboxFor(me.employeeId, ["LEADER", "HR"]), inboxFor(me.employeeId, ["DELEGATE"])]);
+  const [approvals, delegations] = await Promise.all([inboxFor(me.employeeId, ["LEADER", "HR", "FINAL"]), inboxFor(me.employeeId, ["DELEGATE"])]);
   const all = active === "all" ? await allPendingSteps() : [];
   const items: (InboxItem & { assigneeName?: string })[] = active === "approvals" ? approvals : active === "delegations" ? delegations : all;
   const now = Date.now();
@@ -41,7 +41,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
                     <div className="mt-0.5 text-[14px] font-medium text-brand-700">{a.title}</div>
                     <div className="mt-0.5 text-[13px] text-ink-2">{a.summary}</div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <Badge tone={a.kind === "DELEGATE" ? "leave" : a.kind === "HR" ? "warning" : "brand"}>{a.kind === "DELEGATE" ? "Peer delegation" : a.kind === "HR" ? "HR exception" : "Leader approval"}</Badge>
+                      <Badge tone={a.kind === "DELEGATE" ? "leave" : a.kind === "HR" || a.kind === "FINAL" ? "warning" : "brand"}>{a.kind === "DELEGATE" ? "Peer delegation" : a.kind === "HR" ? "HR exception" : a.kind === "FINAL" ? "Final approval" : "Leader approval"}</Badge>
                       {a.flags.map((f) => (
                         <Badge key={f} tone={f.includes("xception") ? "warning" : "neutral"}>
                           {f}

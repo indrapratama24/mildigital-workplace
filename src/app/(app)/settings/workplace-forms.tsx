@@ -468,3 +468,74 @@ export function ArchiveRecognitionButton({ id }: { id: string }) {
 export function AckNotice() {
   return <Notice>Acknowledgements are tracked per published version.</Notice>;
 }
+
+// ───────────── Client categories, ad accounts, industries ─────────────
+
+type ListItem = { id?: string; name: string; isActive: boolean; sortOrder: number };
+
+/** Row editor for simple named lists (client categories, ad account types). */
+export function NamedListRow({ kind, item, usage }: { kind: "category" | "adAccount"; item?: ListItem & { id: string }; usage?: number }) {
+  const blank = { name: "", isActive: true, sortOrder: 50 };
+  const [f, setF] = useState<ListItem>(item ?? blank);
+  const { pending, run } = useRun();
+  const dirty = !item || JSON.stringify(f) !== JSON.stringify(item);
+  const save = () => run(() => (kind === "category" ? W.upsertCategoryAction({ ...f, id: item?.id }) : W.upsertAdAccountTypeAction({ ...f, id: item?.id })), () => !item && setF(blank));
+  return (
+    <div className="grid items-end gap-2 border-b border-line-2 py-2.5 sm:grid-cols-[1fr_80px_auto_auto]">
+      <Field label={item ? (usage !== undefined ? `Name · ${usage} client(s)` : "Name") : kind === "category" ? "New category" : "New ad account"}>
+        <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={60} />
+      </Field>
+      <Field label="Order"><Input type="number" min={0} value={f.sortOrder} onChange={(e) => setF({ ...f, sortOrder: Number(e.target.value) })} /></Field>
+      <div className="pb-2.5"><Checkbox checked={f.isActive} onChange={(e) => setF({ ...f, isActive: e.target.checked })} label="Available" /></div>
+      <Button size="md" variant={dirty ? "primary" : "secondary"} disabled={!dirty || f.name.trim().length < 2} loading={pending} onClick={save}>{item ? "Save" : <><Plus className="h-4 w-4" /> Add</>}</Button>
+    </div>
+  );
+}
+
+export function IndustryRow({ industry, categories }: { industry: { id: string; name: string; categoryId: string | null; brands: number; subIndustries: { id: string; name: string }[] }; categories: { id: string; name: string }[] }) {
+  const [f, setF] = useState({ name: industry.name, categoryId: industry.categoryId ?? "" });
+  const { pending, run } = useRun();
+  const dirty = f.name !== industry.name || f.categoryId !== (industry.categoryId ?? "");
+  return (
+    <div className="border-b border-line-2 py-3">
+      <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
+        <Field label={`Industry · ${industry.brands} client(s)`}><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={80} /></Field>
+        <Field label="Category">
+          <Select value={f.categoryId} onChange={(e) => setF({ ...f, categoryId: e.target.value })}>
+            <option value="">Uncategorised</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+        </Field>
+        <Button size="md" variant={dirty ? "primary" : "secondary"} disabled={!dirty || f.name.trim().length < 2} loading={pending} onClick={() => run(() => W.updateIndustryAction({ kind: "industry", id: industry.id, name: f.name, categoryId: f.categoryId || null }))}>Save</Button>
+        <Button size="md" variant="ghost" className="text-danger" disabled={industry.brands > 0 || industry.subIndustries.length > 0} title={industry.brands || industry.subIndustries.length ? "In use" : "Delete"} onClick={() => run(() => W.updateIndustryAction({ kind: "industry", id: industry.id, remove: true }))}>
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+      {industry.subIndustries.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5 pl-1">
+          <span className="text-[11.5px] text-muted">Sub-industries:</span>
+          {industry.subIndustries.map((s) => <SubIndustryChip key={s.id} sub={s} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SubIndustryChip({ sub }: { sub: { id: string; name: string } }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(sub.name);
+  const { pending, run } = useRun();
+  if (editing)
+    return (
+      <span className="inline-flex items-center gap-1">
+        <Input value={name} onChange={(e) => setName(e.target.value)} className="h-7 w-[160px] text-[12px]" autoFocus maxLength={80} />
+        <Button size="sm" loading={pending} onClick={() => run(() => W.updateIndustryAction({ kind: "sub", id: sub.id, name }), () => setEditing(false))}>Save</Button>
+        <Button size="sm" variant="ghost" className="text-danger" onClick={() => run(() => W.updateIndustryAction({ kind: "sub", id: sub.id, remove: true }))}>Delete</Button>
+      </span>
+    );
+  return (
+    <button type="button" onClick={() => setEditing(true)} className="rounded-full border border-line bg-white px-2.5 py-0.5 text-[12px] text-ink-2 hover:border-brand-300" title="Rename or delete">
+      {sub.name}
+    </button>
+  );
+}

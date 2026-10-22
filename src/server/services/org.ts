@@ -1,6 +1,6 @@
 import type { EmploymentStatus, Prisma, RelationshipType, Role } from "@prisma/client";
 import { db, withTx, type DbOrTx } from "../db";
-import { addDays, fromISO, todayJakarta, toISO, type ISODate } from "@/lib/dates";
+import { addDays, fromISO, isValidISO, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { APPROVER_ROLES, can, hasCompanyScope } from "../authz";
 import type { CurrentUser } from "../auth/session";
 import { badState, conflict, forbidden, invalid, notFound } from "../errors";
@@ -255,6 +255,7 @@ export async function createEmployee(actor: CurrentUser, input: EmployeeInput, t
         jobTitle: input.jobTitle,
         departmentId: input.departmentId,
         startDate: fromISO(input.startDate),
+        fullTimeSince: input.employmentStatus === "PERMANENT" ? fromISO(input.startDate) : null,
         userId: user.id,
       },
     });
@@ -281,7 +282,7 @@ function cryptoRandom() {
 export async function updateEmployee(
   actor: CurrentUser,
   id: string,
-  patch: { fullName?: string; jobTitle?: string; employmentStatus?: EmploymentStatus; departmentId?: string | null; teamId?: string | null; role?: Role; roleDescription?: string | null },
+  patch: { fullName?: string; jobTitle?: string; employmentStatus?: EmploymentStatus; departmentId?: string | null; teamId?: string | null; role?: Role; roleDescription?: string | null; fullTimeSince?: ISODate | null },
 ) {
   if (!can(actor, "employee.manage")) throw forbidden();
   return withTx(async (tx) => {
@@ -301,6 +302,12 @@ export async function updateEmployee(
     if (patch.jobTitle) data.jobTitle = patch.jobTitle;
     if (patch.employmentStatus) data.employmentStatus = patch.employmentStatus;
     if (patch.roleDescription !== undefined) data.roleDescription = patch.roleDescription?.trim() || null;
+    if (patch.fullTimeSince !== undefined) {
+      if (patch.fullTimeSince && !isValidISO(patch.fullTimeSince)) throw invalid("Full-time since is not a valid date.");
+      data.fullTimeSince = patch.fullTimeSince ? fromISO(patch.fullTimeSince) : null;
+    } else if (patch.employmentStatus === "PERMANENT" && before.employmentStatus !== "PERMANENT" && !before.fullTimeSince) {
+      data.fullTimeSince = fromISO(todayJakarta()); // became full-time today
+    }
     if (patch.departmentId !== undefined) data.department = patch.departmentId ? { connect: { id: patch.departmentId } } : { disconnect: true };
     const after = await tx.employee.update({ where: { id }, data });
     if (patch.teamId !== undefined) {
@@ -375,97 +382,3 @@ export function parseCsv(text: string): Record<string, string>[] {
   return body.map((r) => Object.fromEntries(keys.map((k, i) => [k, (r[i] ?? "").trim()])));
 }
 
-export const CSV_TEMPLATE =
-  "employee_id,full_name,email,job_title,employment_status,level_code,department_code,team_name,leader_email,secondary_leader_email,start_date,role,birth_date,phone\n" +
-  "MIL-0100,Contoh Karyawan,contoh@mildigital.id,Performance Marketer,PERMANENT,JUNIOR,GROWTH,Performance,leader@mildigital.id,,2026-11-01,EMPLOYEE,1998-05-17,+62 812-0000-0100\n";
-
-export interface ImportResult {
-  created: number;
-  errors: { row: number; message: string }[];
-}
-
-/** All-or-nothing CSV import: rows are validated first, then created in one transaction. */
-export async function importEmployeesCsv(actor: CurrentUser, text: string, dryRun = false): Promise<ImportResult> {
-  if (!can(actor, "employee.manage")) throw forbidden();
-  const rows = parseCsv(text);
-  if (!rows.length) throw invalid("The CSV file is empty.");
-  if (rows.length > 500) throw invalid("Import at most 500 rows at a time.");
-  const [levels, departments, teams, employees] = await Promise.all([
-    db.employeeLevel.findMany(),
-    db.department.findMany(),
-    db.team.findMany(),
-    db.employee.findMany({ select: { id: true, email: true, employeeCode: true } }),
-  ]);
-  const errors: ImportResult["errors"] = [];
-  const inputs: { row: number; input: EmployeeInput; leaderEmail?: string; secondaryEmail?: string; birthDate?: string; phone?: string }[] = [];
-  const seenEmails = new Set<string>();
-  rows.forEach((r, i) => {
-    const row = i + 2;
-    const err = (m: string) => errors.push({ row, message: m });
-    const email = (r.email ?? "").toLowerCase();
-    if (!r.employee_id || !r.full_name || !email || !r.job_title || !r.start_date) return err("Missing required column (employee_id, full_name, email, job_title, start_date).");
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err(`Invalid email "${r.email}".`);
-    if (seenEmails.has(email) || employees.some((e) => e.email === email)) return err(`Email ${email} already exists.`);
-    if (employees.some((e) => e.employeeCode === r.employee_id)) return err(`Employee ID ${r.employee_id} already exists.`);
-    seenEmails.add(email);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(r.start_date)) return err("start_date must be YYYY-MM-DD.");
-    const level = levels.find((l) => l.code === (r.level_code ?? "").toUpperCase());
-    if (!level) return err(`Unknown level_code "${r.level_code}". Use ${levels.map((l) => l.code).join(", ")}.`);
-    const dept = r.department_code ? departments.find((d) => d.code === r.department_code.toUpperCase()) : null;
-    if (r.department_code && !dept) return err(`Unknown department_code "${r.department_code}".`);
-    const team = r.team_name ? teams.find((t) => t.name.toLowerCase() === r.team_name.toLowerCase()) : null;
-    if (r.team_name && !team) return err(`Unknown team "${r.team_name}".`);
-    const status = (r.employment_status || "PERMANENT").toUpperCase();
-    if (!["PERMANENT", "CONTRACT", "PROBATION", "INTERN"].includes(status)) return err(`Invalid employment_status "${status}".`);
-    const role = (r.role || "EMPLOYEE").toUpperCase();
-    if (!["EMPLOYEE", "LEADER"].includes(role)) return err("CSV import can only grant EMPLOYEE or LEADER roles.");
-    if (r.birth_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.birth_date)) return err("birth_date must be YYYY-MM-DD.");
-    inputs.push({
-      row,
-      birthDate: r.birth_date || undefined,
-      phone: r.phone || undefined,
-      leaderEmail: r.leader_email?.toLowerCase() || undefined,
-      secondaryEmail: r.secondary_leader_email?.toLowerCase() || undefined,
-      input: {
-        employeeCode: r.employee_id,
-        fullName: r.full_name,
-        email,
-        jobTitle: r.job_title,
-        employmentStatus: status as EmploymentStatus,
-        levelId: level.id,
-        departmentId: dept?.id ?? team?.departmentId ?? null,
-        teamId: team?.id ?? null,
-        leaderId: null,
-        secondaryLeaderId: null,
-        startDate: r.start_date,
-        role: role as Role,
-      },
-    });
-  });
-  if (errors.length || dryRun) return { created: 0, errors };
-  await withTx(async (tx) => {
-    const created = new Map<string, string>();
-    for (const item of inputs) {
-      const emp = await createEmployee(actor, item.input, tx);
-      created.set(item.input.email, emp.id);
-      if (item.birthDate || item.phone)
-        await tx.employeePersonalData.create({ data: { employeeId: emp.id, birthDate: item.birthDate ? fromISO(item.birthDate) : null, phone: item.phone ?? null, updatedById: actor.employeeId } });
-    }
-    // second pass: leaders may be existing employees or rows from the same file
-    for (const item of inputs) {
-      for (const [email, type] of [
-        [item.leaderEmail, "PRIMARY"],
-        [item.secondaryEmail, "SECONDARY"],
-      ] as const) {
-        if (!email) continue;
-        const leaderId = created.get(email) ?? (await tx.employee.findUnique({ where: { email } }))?.id;
-        if (!leaderId) throw invalid(`Row ${item.row}: leader ${email} not found.`);
-        const empId = created.get(item.input.email)!;
-        await validateLeaderAssignment(tx, empId, leaderId, item.input.startDate);
-        await tx.reportingRelationship.create({ data: { employeeId: empId, leaderId, type, effectiveFrom: fromISO(item.input.startDate), createdById: actor.userId } });
-      }
-    }
-    await audit(tx, { actorUserId: actor.userId, action: "employee.import", entityType: "Employee", entityId: "bulk", metadata: { count: inputs.length } });
-  });
-  return { created: inputs.length, errors: [] };
-}

@@ -20,6 +20,7 @@ export const SETTINGS_GROUPS: { label: string; items: SettingsNavItem[] }[] = [
       { href: "/settings/policies", label: "WFO policies & levels", perm: "policy.manage" },
       { href: "/settings/holidays", label: "Holidays", perm: "holiday.manage" },
       { href: "/settings/requests", label: "Request types", perm: "requestType.manage" },
+      { href: "/settings/leave", label: "Leave rules", perm: "requestType.manage" },
       { href: "/settings/approvals", label: "Approvals", perm: "settings.manage" },
     ],
   },

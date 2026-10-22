@@ -49,7 +49,7 @@ export async function authorizeFileAccess(viewer: CurrentUser, fileId: string) {
     const r = file.request;
     if (can(viewer, "company.view")) return file;
     const approver = await db.approvalStep.count({
-      where: { kind: { in: ["LEADER", "HR"] }, OR: [{ assigneeId: viewer.employeeId }, { originalAssigneeId: viewer.employeeId }], workflow: { subjectType: "REQUEST", subjectId: r.id } },
+      where: { kind: { in: ["LEADER", "HR", "FINAL"] }, OR: [{ assigneeId: viewer.employeeId }, { originalAssigneeId: viewer.employeeId }], workflow: { subjectType: "REQUEST", subjectId: r.id } },
     });
     if (approver) return file;
     if (!file.isSensitive && can(viewer, "team.view") && (await isLeaderOf(db, viewer.employeeId, r.employeeId))) return file;

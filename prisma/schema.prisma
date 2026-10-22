@@ -141,6 +141,8 @@ enum StepKind {
   DELEGATE
   LEADER
   HR
+  /// Final approval after the leader (e.g. CEO), configured in Settings → Approvals.
+  FINAL
 }
 
 enum StepStatus {
@@ -174,14 +176,16 @@ enum ExceptionKind {
 // ───────────────────────────── Identity ─────────────────────────────
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String
-  role         Role      @default(EMPLOYEE)
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  passwordHash       String
+  role               Role      @default(EMPLOYEE)
+  isActive           Boolean   @default(true)
+  /// Set by an admin password reset: the user must choose a new password at next sign-in.
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   employee      Employee?
   sessions      Session[]
@@ -249,6 +253,8 @@ model Employee {
   departmentId     String?
   department       Department?      @relation(fields: [departmentId], references: [id])
   startDate        DateTime         @db.Date
+  /// First day as full-time (leave-eligible) employee; monthly leave accrual starts from this month.
+  fullTimeSince    DateTime?        @db.Date
   isActive         Boolean          @default(true)
   deactivatedAt    DateTime?
   createdAt        DateTime         @default(now())
@@ -294,6 +300,7 @@ model Employee {
   recognitionsGiven   EmployeeRecognition[]            @relation("RecognitionAuthor")
   clientAssignments   ClientTeamAssignment[]           @relation("ClientAssignments")
   clientStatusChanges ClientStatusHistory[]            @relation("ClientStatusChangedBy")
+  leaveYearEndChoices LeaveYearEndChoice[]
 
   @@index([isActive])
   @@index([departmentId])
@@ -599,27 +606,55 @@ model AttendanceException {
 
 /// Configurable request categories (LeaveTypes): annual, sick, permission, offsite, additional WFH, ...
 model RequestType {
-  id                  String          @id @default(cuid())
-  code                String          @unique
+  id                  String             @id @default(cuid())
+  code                String             @unique
   name                String
   category            RequestCategory
   description         String?
-  documentRequirement Requirement     @default(NONE)
-  delegation          Requirement     @default(OPTIONAL)
-  reasonMinLength     Int             @default(10)
-  advanceNoticeDays   Int             @default(0)
-  allowHalfDay        Boolean         @default(true)
-  allowHourly         Boolean         @default(false)
-  deductsBalance      Boolean         @default(false)
+  documentRequirement Requirement        @default(NONE)
+  delegation          Requirement        @default(OPTIONAL)
+  reasonMinLength     Int                @default(10)
+  advanceNoticeDays   Int                @default(0)
+  allowHalfDay        Boolean            @default(true)
+  allowHourly         Boolean            @default(false)
+  deductsBalance      Boolean            @default(false)
   defaultEntitlement  Float?
-  isSensitive         Boolean         @default(false)
-  isActive            Boolean         @default(true)
-  sortOrder           Int             @default(0)
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  /// Entitlement accrues evenly per month (e.g. 12/year = 1 per month) from the month the employee became eligible.
+  monthlyAccrual      Boolean            @default(false)
+  /// Employment statuses that earn this balance (empty = everyone).
+  eligibleStatuses    EmploymentStatus[] @default([])
+  /// Annual-leave policy: usage tiers, max off days, concurrency cap and year-end cash/carry choice (Settings → Leave rules).
+  annualRules         Boolean            @default(false)
+  isSensitive         Boolean            @default(false)
+  isActive            Boolean            @default(true)
+  sortOrder           Int                @default(0)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
   requests Request[]
   balances LeaveBalance[]
+  yearEnd  LeaveYearEndChoice[]
+}
+
+enum YearEndOption {
+  CASH
+  CARRY
+}
+
+/// Employee's choice for leftover annual leave at year end: paid out, or carried into next year (until the cut-off month).
+model LeaveYearEndChoice {
+  id            String        @id @default(cuid())
+  employeeId    String
+  employee      Employee      @relation(fields: [employeeId], references: [id])
+  requestTypeId String
+  requestType   RequestType   @relation(fields: [requestTypeId], references: [id])
+  year          Int
+  option        YearEndOption
+  days          Float
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([employeeId, requestTypeId, year])
 }
 
 model LeaveBalance {
@@ -1281,6 +1316,62 @@ model ClientPackage {
   engagementPackages ClientEngagementPackage[]
 }
 
+/// Brand classification: Category → Industry → Sub-industry. Industries and sub-industries typed on a
+/// client are saved here and offered for other brands.
+model ClientCategory {
+  id         String           @id @default(cuid())
+  name       String           @unique
+  sortOrder  Int              @default(0)
+  isActive   Boolean          @default(true)
+  createdAt  DateTime         @default(now())
+  industries ClientIndustry[]
+  brands     ClientBrand[]
+}
+
+model ClientIndustry {
+  id            String              @id @default(cuid())
+  name          String
+  categoryId    String?
+  category      ClientCategory?     @relation(fields: [categoryId], references: [id])
+  createdAt     DateTime            @default(now())
+  subIndustries ClientSubIndustry[]
+  brands        ClientBrand[]
+
+  @@unique([categoryId, name])
+}
+
+model ClientSubIndustry {
+  id         String         @id @default(cuid())
+  name       String
+  industryId String
+  industry   ClientIndustry @relation(fields: [industryId], references: [id])
+  createdAt  DateTime       @default(now())
+  brands     ClientBrand[]
+
+  @@unique([industryId, name])
+}
+
+/// Ad account types a client's campaigns run on (Meta Regular, GMV Max TikTok, …). Extendable.
+model ClientAdAccountType {
+  id        String                 @id @default(cuid())
+  name      String                 @unique
+  isActive  Boolean                @default(true)
+  sortOrder Int                    @default(0)
+  createdAt DateTime               @default(now())
+  brands    ClientBrandAdAccount[]
+}
+
+model ClientBrandAdAccount {
+  brandId   String
+  brand     ClientBrand         @relation(fields: [brandId], references: [id])
+  typeId    String
+  type      ClientAdAccountType @relation(fields: [typeId], references: [id])
+  createdAt DateTime            @default(now())
+
+  @@id([brandId, typeId])
+  @@index([typeId])
+}
+
 /// Optional legal/business parent. One organization can own several brands.
 model ClientOrganization {
   id        String   @id @default(cuid())
@@ -1306,13 +1397,19 @@ model ClientBrand {
   dateStart               DateTime            @db.Date
   /// End of the latest collaboration while Inactive.
   dateOff                 DateTime?           @db.Date
-  industry                String?
+  categoryId              String?
+  category                ClientCategory?     @relation(fields: [categoryId], references: [id])
+  industryId              String?
+  industry                ClientIndustry?     @relation(fields: [industryId], references: [id])
+  subIndustryId           String?
+  subIndustry             ClientSubIndustry?  @relation(fields: [subIndustryId], references: [id])
   description             String?
   websiteUrl              String?
   instagramUrl            String?
   tiktokUrl               String?
   picName                 String?
-  picContact              String?
+  picPhone                String?
+  picEmail                String?
   internalNotes           String?
   primaryConsultantWaived Boolean             @default(false)
   waiverReason            String?
@@ -1322,12 +1419,15 @@ model ClientBrand {
   updatedAt               DateTime            @updatedAt
 
   engagements   ClientEngagement[]
+  adAccounts    ClientBrandAdAccount[]
   statusHistory ClientStatusHistory[]
   assignments   ClientTeamAssignment[]
   codeAliases   ClientCodeAlias[]
 
   @@index([status])
   @@index([name])
+  @@index([categoryId])
+  @@index([industryId])
 }
 
 /// Retired Client IDs (after an authorised ID change) so they are never reused.

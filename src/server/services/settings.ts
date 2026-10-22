@@ -1,4 +1,5 @@
 import { db, type DbOrTx } from "../db";
+import { DEFAULT_ANNUAL_RULES, type AnnualLeaveRules } from "@/lib/engine/leave";
 import { audit } from "./audit";
 
 export interface AppSettings {
@@ -21,6 +22,15 @@ export interface AppSettings {
   clientFreezeCountsAsActive: boolean;
   /** Leaders highlighted in the Team Directory (ordered); null = not curated yet (team leads are shown). */
   directoryLeaders: { employeeId: string; caption: string | null }[] | null;
+  /** Portfolio breakdown charts shown on Client & Portfolio, in order. */
+  clientHighlights: string[];
+  /** Approver after the leader (e.g. CEO) for the request types listed below; null = no final approval. */
+  finalApproverEmployeeId: string | null;
+  finalApprovalRequestTypes: string[];
+  /** Annual leave policy for request types with `annualRules`. */
+  annualLeaveRules: AnnualLeaveRules;
+  /** Year-end leftover: up to `maxDays` can be paid out or carried over; the choice opens `windowDays` before 31 Dec; carried days must be used by the end of `carryUntilMonth`. */
+  leaveYearEnd: { enabled: boolean; maxDays: number; windowDays: number; carryUntilMonth: number };
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -38,6 +48,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   clientRequirePrimaryConsultant: true,
   clientFreezeCountsAsActive: false,
   directoryLeaders: null,
+  clientHighlights: ["package", "category", "consultant"],
+  finalApproverEmployeeId: null,
+  finalApprovalRequestTypes: [],
+  annualLeaveRules: DEFAULT_ANNUAL_RULES,
+  leaveYearEnd: { enabled: true, maxDays: 6, windowDays: 30, carryUntilMonth: 6 },
 };
 
 export async function getSettings(tx: DbOrTx = db): Promise<AppSettings> {

@@ -2,7 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { changeLevelAction, createEmployeeAction, importEmployeesAction, policyOverrideAction, setEmployeeActiveAction, setLeaderAction, updateEmployeeAction } from "@/server/actions/admin";
+import { changeLevelAction, createEmployeeAction, policyOverrideAction, setEmployeeActiveAction, setLeaderAction, updateEmployeeAction } from "@/server/actions/admin";
 import { setLeaveBalanceAction } from "@/server/actions/admin";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
@@ -44,7 +44,7 @@ export function EditEmployeeForm({
   levelDefaultDate,
 }: {
   id: string;
-  initial: { fullName: string; jobTitle: string; employmentStatus: string; departmentId: string; teamId: string; role: string; levelId: string; roleDescription: string };
+  initial: { fullName: string; jobTitle: string; employmentStatus: string; departmentId: string; teamId: string; role: string; levelId: string; roleDescription: string; fullTimeSince: string };
   departments: Opt[];
   teams: Opt[];
   levels: Opt[];
@@ -60,7 +60,7 @@ export function EditEmployeeForm({
   const save = () =>
     start(async () => {
       const { levelId, ...profile } = f;
-      const r = await updateEmployeeAction(id, { ...profile, departmentId: f.departmentId || null, teamId: f.teamId || null, roleDescription: f.roleDescription.trim() || null });
+      const r = await updateEmployeeAction(id, { ...profile, departmentId: f.departmentId || null, teamId: f.teamId || null, roleDescription: f.roleDescription.trim() || null, fullTimeSince: f.fullTimeSince || null });
       if (!r.ok) return void toast.error(r.error);
       if (levelChanged) {
         const l = await changeLevelAction({ employeeId: id, levelId, effectiveFrom: levelFrom, reason: levelReason.trim() || "Level group updated in profile" });
@@ -77,6 +77,9 @@ export function EditEmployeeForm({
         <Select value={f.employmentStatus} onChange={(e) => setF({ ...f, employmentStatus: e.target.value })}>
           {STATUSES.map((s) => <option key={s} value={s}>{s.toLowerCase()}</option>)}
         </Select>
+      </Field>
+      <Field label="Leave-eligible since" hint="The day they passed probation (about 3 months for regular staff, 6 for trainees; extended probation follows the company's decision). Annual leave is earned 1 day per month from this month.">
+        <Input type="date" value={f.fullTimeSince} onChange={(e) => setF({ ...f, fullTimeSince: e.target.value })} />
       </Field>
       <Field label="Permission role" hint="Independent of level. Approvers need Leader/HR/Admin.">
         <Select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
@@ -290,43 +293,3 @@ export function NewEmployeeForm({ departments, teams, levels, leaders, canGrantA
   );
 }
 
-export function ImportForm({ template }: { template: string }) {
-  const router = useRouter();
-  const [csv, setCsv] = useState("");
-  const [result, setResult] = useState<{ created: number; errors: { row: number; message: string }[] } | null>(null);
-  const [validated, setValidated] = useState(false);
-  const [pending, start] = useTransition();
-  const go = (dryRun: boolean) =>
-    start(async () => {
-      const r = await importEmployeesAction({ csv, dryRun });
-      if (!r.ok) return void toast.error(r.error);
-      setResult(r.data!);
-      if (dryRun) setValidated(r.data!.errors.length === 0);
-      else if (!r.data!.errors.length) {
-        toast.success(`${r.data!.created} employee(s) imported`);
-        router.push("/directory");
-      }
-    });
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <Button variant="secondary" size="sm" onClick={() => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([template], { type: "text/csv" })); a.download = "employee-import-template.csv"; a.click(); }}>Download template</Button>
-        <label className="inline-flex cursor-pointer items-center rounded-full border border-line bg-white px-3 text-[13px] font-medium leading-8 hover:border-brand-200">
-          Choose CSV file
-          <input type="file" accept=".csv,text/csv" className="sr-only" onChange={async (e) => { const file = e.target.files?.[0]; if (file) { setCsv(await file.text()); setValidated(false); setResult(null); } }} />
-        </label>
-      </div>
-      <Textarea value={csv} onChange={(e) => { setCsv(e.target.value); setValidated(false); }} className="min-h-[200px] font-mono text-[12px]" placeholder="Paste CSV here or choose a file" />
-      {result && result.errors.length > 0 && (
-        <Notice tone="danger" title={`${result.errors.length} problem(s) — nothing was imported`}>
-          <Table><tbody>{result.errors.map((e, i) => <tr key={i}><td className="w-16">Row {e.row}</td><td>{e.message}</td></tr>)}</tbody></Table>
-        </Notice>
-      )}
-      {validated && <Notice tone="success">All rows are valid. Import runs in a single transaction (all-or-nothing).</Notice>}
-      <div className="flex gap-2">
-        <Button variant="secondary" loading={pending && !validated} disabled={!csv.trim()} onClick={() => go(true)}>Validate</Button>
-        <Button disabled={!validated} loading={pending && validated} onClick={() => go(false)}>Import</Button>
-      </div>
-    </div>
-  );
-}

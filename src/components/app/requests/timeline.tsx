@@ -16,7 +16,7 @@ export interface TimelineStep {
   escalated: boolean;
 }
 
-const KIND: Record<string, string> = { DELEGATE: "Layer 1 · Peer delegate", LEADER: "Layer 2 · Leader approval", HR: "Layer 3 · HR exception approval" };
+const KIND: Record<string, string> = { DELEGATE: "Layer 1 · Peer delegate", LEADER: "Layer 2 · Leader approval", HR: "Layer 3 · HR exception approval", FINAL: "Final approval" };
 
 export function ApprovalTimeline({ steps, actions }: { steps: TimelineStep[]; actions: { at: Date; actor: string | null; action: string; comment: string | null }[] }) {
   return (

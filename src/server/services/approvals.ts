@@ -1,3 +1,4 @@
+import type { StepKind } from "@prisma/client";
 // Decision entry point: every approval/delegation decision runs in ONE serializable transaction
 // that records the immutable action, advances the workflow and applies the subject's effects.
 import { db, withTx } from "../db";
@@ -82,7 +83,7 @@ export async function escalateOverdue(now = new Date()) {
 
 export interface InboxItem {
   stepId: string;
-  kind: "LEADER" | "HR" | "DELEGATE";
+  kind: StepKind;
   subjectType: "SCHEDULE" | "REVISION" | "REQUEST" | "EVENT_EXCEPTION";
   subjectId: string;
   status: string;
@@ -97,7 +98,7 @@ export interface InboxItem {
   link: string;
 }
 
-export async function inboxFor(employeeId: string, kinds: ("LEADER" | "HR" | "DELEGATE")[]): Promise<InboxItem[]> {
+export async function inboxFor(employeeId: string, kinds: StepKind[]): Promise<InboxItem[]> {
   const steps = await db.approvalStep.findMany({
     where: { assigneeId: employeeId, kind: { in: kinds }, status: { in: ["PENDING", "CLARIFICATION_REQUESTED"] }, workflow: { status: "PENDING" } },
     include: { workflow: { include: { requester: { select: { id: true, fullName: true, jobTitle: true } } } } },

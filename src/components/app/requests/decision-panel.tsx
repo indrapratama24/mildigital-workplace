@@ -20,7 +20,7 @@ const LABELS: Record<Decision, string> = {
   REQUEST_CLARIFICATION: "Request clarification",
 };
 
-export function DecisionPanel({ stepId, kind, redirectTo = "/approvals" }: { stepId: string; kind: "LEADER" | "HR" | "DELEGATE"; redirectTo?: string }) {
+export function DecisionPanel({ stepId, kind, redirectTo = "/approvals" }: { stepId: string; kind: "LEADER" | "HR" | "DELEGATE" | "FINAL"; redirectTo?: string }) {
   const router = useRouter();
   const [comment, setComment] = useState("");
   const [confirm, setConfirm] = useState<Decision | null>(null);

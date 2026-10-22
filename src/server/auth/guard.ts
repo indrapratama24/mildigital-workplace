@@ -8,6 +8,7 @@ import { DomainError, forbidden } from "../errors";
 export async function requirePageUser(): Promise<CurrentUser> {
   const u = await getCurrentUser();
   if (!u) redirect("/login");
+  if (u.mustChangePassword) redirect("/change-password");
   return u;
 }
 
@@ -21,6 +22,7 @@ export async function requirePagePermission(p: Permission): Promise<CurrentUser>
 export async function requireUser(): Promise<CurrentUser> {
   const u = await getCurrentUser();
   if (!u) throw new DomainError("UNAUTHENTICATED", "Your session has expired. Please sign in again.");
+  if (u.mustChangePassword) throw new DomainError("FORBIDDEN", "Set a new password first.");
   return u;
 }
 

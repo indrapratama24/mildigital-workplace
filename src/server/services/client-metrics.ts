@@ -12,11 +12,14 @@ async function brandsWithHistory() {
     select: {
       id: true,
       name: true,
-      industry: true,
+      industry: { select: { id: true, name: true } },
+      category: { select: { id: true, name: true } },
       dateStart: true,
       statusHistory: { select: { status: true, effectiveFrom: true, effectiveTo: true } },
       engagements: { select: { packages: { select: { effectiveFrom: true, effectiveTo: true, package: { select: { id: true, name: true } } } } } },
       assignments: { select: { role: true, effectiveFrom: true, effectiveTo: true, employee: { select: { id: true, fullName: true } } } },
+      subIndustry: { select: { id: true, name: true } },
+      adAccounts: { select: { type: { select: { id: true, name: true } } } },
     },
   });
 }
@@ -67,10 +70,15 @@ export async function portfolioSummary(year: number, month: number) {
       const p = b.engagements.flatMap((e) => e.packages).find((x) => covers(x, asOf));
       return p ? [{ key: p.package.id, label: p.package.name }] : [{ key: "none", label: "No package" }];
     }),
-    byIndustry: tally((b) => [{ key: b.industry ?? "none", label: b.industry ?? "Not set" }]),
+    byCategory: tally((b) => [{ key: b.category?.id ?? "none", label: b.category?.name ?? "Not set" }]),
+    byIndustry: tally((b) => [{ key: b.industry?.id ?? "none", label: b.industry?.name ?? "Not set" }]),
     byConsultant: tally((b) =>
       b.assignments.filter((a) => a.role === "CONSULTANT_PRIMARY" && covers(a, asOf)).map((a) => ({ key: a.employee.id, label: a.employee.fullName })),
     ),
+    byAdsStrategist: tally((b) => b.assignments.filter((a) => a.role === "ADS_STRATEGIST" && covers(a, asOf)).map((a) => ({ key: a.employee.id, label: a.employee.fullName }))),
+    bySubIndustry: tally((b) => [{ key: b.subIndustry?.id ?? "none", label: b.subIndustry?.name ?? "Not set" }]),
+    // Ad accounts are current links (not dated), so this breakdown always reflects today.
+    byAdAccount: tally((b) => (b.adAccounts.length ? b.adAccounts.map((a) => ({ key: a.type.id, label: a.type.name })) : [{ key: "none", label: "None" }])),
   };
 }
 
@@ -104,3 +112,15 @@ export async function clientStatusHistory(brandId: string) {
   const rows = await db.clientStatusHistory.findMany({ where: { brandId }, orderBy: { effectiveFrom: "asc" } });
   return rows.map((r) => ({ status: r.status, fromStatus: r.fromStatus, from: toISO(r.effectiveFrom), to: r.effectiveTo ? toISO(r.effectiveTo) : null, reason: r.reason }));
 }
+
+/** Breakdown charts that can be highlighted on the portfolio page. */
+export const PORTFOLIO_BREAKDOWNS = {
+  package: { title: "Active by package", key: "byPackage" },
+  category: { title: "Active by category", key: "byCategory" },
+  industry: { title: "Active by industry", key: "byIndustry" },
+  subIndustry: { title: "Active by sub-industry", key: "bySubIndustry" },
+  consultant: { title: "Active by Consultant 1", key: "byConsultant" },
+  adsStrategist: { title: "Active by Ads Strategist", key: "byAdsStrategist" },
+  adAccount: { title: "Active by ad account", key: "byAdAccount" },
+} as const;
+export type PortfolioBreakdown = keyof typeof PORTFOLIO_BREAKDOWNS;

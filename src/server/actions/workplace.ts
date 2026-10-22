@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission, requireUser } from "../auth/guard";
 import { runAction } from "../errors";
-import { archiveClient, changeClientStatus, createClient, removePackage, updateClient, upsertPackage } from "../services/clients";
+import { archiveClient, changeClientStatus, createClient, removePackage, updateClient, updateIndustry, upsertAdAccountType, upsertCategory, upsertPackage } from "../services/clients";
+import { importClientsCsv } from "../services/client-import";
 import {
   acknowledgeRegulation,
   archiveRecognition,
@@ -37,13 +38,17 @@ const team = z.object({
 const info = {
   name: z.string().max(120),
   organizationName: optText(120),
-  industry: optText(80),
+  categoryId: z.string().nullable().optional(),
+  industryName: optText(80),
+  subIndustryName: optText(80),
+  adAccounts: z.array(z.string().max(60)).max(20).optional(),
   description: optText(3000),
   websiteUrl: optText(300),
   instagramUrl: optText(300),
   tiktokUrl: optText(300),
   picName: optText(120),
-  picContact: optText(200),
+  picPhone: optText(40),
+  picEmail: optText(200),
   internalNotes: optText(5000),
 };
 
@@ -83,6 +88,7 @@ export async function updateClientAction(id: string, input: unknown) {
         waivePrimary: z.boolean().optional(),
         waiverReason: optText(300),
         status: z.object({ status, effectiveDate: date.nullable().optional(), dateOff: date.nullable().optional(), reason: optText(500) }).nullable().optional(),
+        teamEffectiveDate: date.nullable().optional(),
       })
       .parse(input);
     await updateClient(me, z.string().parse(id), p);
@@ -123,6 +129,52 @@ export async function removePackageAction(id: string) {
     refresh();
     return r;
   });
+}
+
+const listItem = z.object({ id: z.string().optional(), name: z.string().max(60), isActive: z.boolean(), sortOrder: z.number().int().min(0).max(999) });
+
+export async function upsertCategoryAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    await upsertCategory(me, listItem.parse(input));
+    refresh();
+  }, "Category saved");
+}
+
+export async function upsertAdAccountTypeAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    await upsertAdAccountType(me, listItem.parse(input));
+    refresh();
+  }, "Ad account saved");
+}
+
+export async function updateIndustryAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    const p = z.object({ kind: z.enum(["industry", "sub"]), id: z.string(), name: z.string().max(80).optional(), categoryId: z.string().nullable().optional(), remove: z.boolean().optional() }).parse(input);
+    await updateIndustry(me, p);
+    refresh();
+  }, "Saved");
+}
+
+export async function importClientsAction(text: unknown, dryRun: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    const r = await importClientsCsv(me, z.string().max(5_000_000).parse(text), z.boolean().parse(dryRun));
+    if (!r.dryRun) refresh();
+    return r;
+  });
+}
+
+export async function updateClientHighlightsAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requirePermission("clientPackage.manage");
+    const keys = ["package", "category", "industry", "subIndustry", "consultant", "adsStrategist", "adAccount"] as const;
+    const p = z.array(z.enum(keys)).max(6).parse(input);
+    await updateSettings(me, { clientHighlights: [...new Set(p)] });
+    refresh();
+  }, "Highlights saved");
 }
 
 export async function updateClientRulesAction(input: unknown) {

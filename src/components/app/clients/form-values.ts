@@ -15,13 +15,17 @@ export interface ClientFormValues {
   adsStrategists: string[];
   waivePrimary: boolean;
   waiverReason: string;
-  industry: string;
+  categoryId: string;
+  industryName: string;
+  subIndustryName: string;
+  adAccounts: string[];
   description: string;
   websiteUrl: string;
   instagramUrl: string;
   tiktokUrl: string;
   picName: string;
-  picContact: string;
+  picPhone: string;
+  picEmail: string;
   internalNotes: string;
 }
 
@@ -39,12 +43,22 @@ export const EMPTY_CLIENT: ClientFormValues = {
   adsStrategists: [],
   waivePrimary: false,
   waiverReason: "",
-  industry: "",
+  categoryId: "",
+  industryName: "",
+  subIndustryName: "",
+  adAccounts: [],
   description: "",
   websiteUrl: "",
   instagramUrl: "",
   tiktokUrl: "",
   picName: "",
-  picContact: "",
+  picPhone: "",
+  picEmail: "",
   internalNotes: "",
 };
+
+export interface TaxonomyOptions {
+  categories: { id: string; name: string; isActive: boolean }[];
+  industries: { id: string; name: string; categoryId: string | null; subIndustries: { id: string; name: string }[] }[];
+  adAccounts: { id: string; name: string; isActive: boolean }[];
+}
