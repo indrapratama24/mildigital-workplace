@@ -1,7 +1,7 @@
 import { db } from "@/server/db";
 import { requirePagePermission } from "@/server/auth/guard";
 import { listPoliciesWithVersions } from "@/server/services/policy";
-import { addMonths, currentMonthJakarta, formatDate, monthStart, todayJakarta, toISO, WEEKDAY_SHORT } from "@/lib/dates";
+import { formatDate, todayJakarta, toISO, WEEKDAY_SHORT } from "@/lib/dates";
 import { validatePolicyRules } from "@/lib/engine/working-days";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +11,6 @@ import { CancelVersionButton, LevelRow, NewLevelForm, NewPolicyForm, PolicyEditD
 export default async function PoliciesPage() {
   await requirePagePermission("policy.manage");
   const today = todayJakarta();
-  const c = currentMonthJakarta();
-  const n = addMonths(c.year, c.month, 1);
   const [allPolicies, levels] = await Promise.all([listPoliciesWithVersions(), db.employeeLevel.findMany({ orderBy: { rank: "asc" } })]);
   const policies = allPolicies.filter((p) => p.isActive);
   const archived = allPolicies.filter((p) => !p.isActive);
@@ -22,7 +20,8 @@ export default async function PoliciesPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         {policies.map((p) => {
           const current = p.versions.find((v) => toISO(v.effectiveFrom) <= today && (!v.effectiveTo || toISO(v.effectiveTo) >= today)) ?? p.versions[0];
-          const upcoming = p.versions.filter((v) => toISO(v.effectiveFrom) > today);
+          // Versions starting today or later stay editable (until a plan is submitted under them).
+          const upcoming = p.versions.filter((v) => toISO(v.effectiveFrom) >= today);
           const check = current ? validatePolicyRules({ wfoPercent: current.wfoPercent, mandatoryWeekdays: current.mandatoryWeekdays, flexibleWeekdays: current.flexibleWeekdays }) : null;
           return (
             <Card key={p.id}>
@@ -33,7 +32,7 @@ export default async function PoliciesPage() {
                   <div className="flex flex-wrap items-center gap-1">
                     <PolicyEditDialog policy={{ id: p.id, name: p.name, description: p.description }} />
                     <RemovePolicyButton policy={{ id: p.id, name: p.name }} usedBy={p.levels.map((l) => l.name)} />
-                    {current && <PolicyVersionDialog policyId={p.id} policyName={p.name} current={current} defaultDate={monthStart(n.year, n.month)} />}
+                    {current && <PolicyVersionDialog policyId={p.id} policyName={p.name} current={current} defaultDate={today} />}
                   </div>
                 }
               />
@@ -62,7 +61,7 @@ export default async function PoliciesPage() {
                     <div key={u.id} className="rounded-xl border border-warning/30 bg-warning-soft/40 px-3 py-2.5 text-[13px]">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="flex flex-wrap items-center gap-2">
-                          <Badge tone="pending">Scheduled</Badge>
+                          {toISO(u.effectiveFrom) === today ? <Badge tone="success">Active from today</Badge> : <Badge tone="pending">Scheduled</Badge>}
                           <b className="text-ink">v{u.version} from {formatDate(toISO(u.effectiveFrom))}</b>
                         </span>
                         <span className="flex items-center gap-1">

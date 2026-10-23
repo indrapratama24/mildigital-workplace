@@ -414,6 +414,21 @@ describe("Scenario E — level change and historical policy versions", () => {
     expect((await db.policyVersion.findUniqueOrThrow({ where: { id: prev.id } })).effectiveTo).toBeNull();
     expect((await loadMonthContext(org.ids.junior, 2027, 2)).policy?.version.wfoPercent).toBe(75);
   });
+
+  it("a version can take effect today and still be adjusted or cancelled today", async () => {
+    const admin = await org.actor("admin");
+    const base = {
+      wfoPercent: 80, mandatoryWeekdays: [1, 3, 4], flexibleWeekdays: [2, 5], evaluationPeriod: "MONTHLY" as const, submissionDeadlineDay: 25,
+      requiresLeaderApproval: true, wfhCarryOver: false, exceptionsRequireHr: true, roundingMode: "CEIL" as const, excludeLeaveFromDenominator: true, offsiteCountsAsWfo: true,
+      effectiveFrom: "2026-11-02", changeNote: "Effective immediately",
+    };
+    const { created } = await createPolicyVersion(admin, org.policies.JUNIOR, base);
+    expect((await loadMonthContext(org.ids.junior, 2026, 11)).policy?.version.id).toBe(created.id);
+    await updatePolicyVersion(admin, created.id, { ...base, wfoPercent: 70, changeNote: "Adjusted the same day" });
+    expect((await loadMonthContext(org.ids.junior, 2026, 11)).policy?.version.wfoPercent).toBe(70);
+    await cancelPolicyVersion(admin, created.id);
+    expect((await loadMonthContext(org.ids.junior, 2026, 11)).policy?.version.wfoPercent).toBe(75);
+  });
 });
 
 describe("Attendance verification", () => {

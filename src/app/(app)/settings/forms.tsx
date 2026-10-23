@@ -99,7 +99,7 @@ export function PolicyVersionDialog({
       <Dialog
         open={open}
         onOpenChange={setOpen}
-        title={edit ? `Edit scheduled v${edit.version} · ${policyName}` : `New version · ${policyName}`}
+        title={edit ? `Edit v${edit.version} · ${policyName}` : `New version · ${policyName}`}
         description={
           edit
             ? "This version hasn't taken effect yet, so its rules and start date can still change. The previous version is extended or shortened to match."

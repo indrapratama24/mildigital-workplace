@@ -33,7 +33,7 @@ export interface ResolvedPolicy {
  * Policy applicable to an employee for a month, evaluated on the first day of the month:
  *   1. explicit authorised override (EmployeePolicyAssignment), else
  *   2. the policy of the employee's level effective that day.
- * The version is the policy version effective on that day. Submitted schedules snapshot the version
+ * The version is the policy version effective on that day (for the current month: today). Submitted schedules snapshot the version
  * so later policy edits never change history.
  */
 export async function resolvePolicy(tx: DbOrTx, employeeId: string, year: number, month: number): Promise<ResolvedPolicy | null> {
@@ -46,7 +46,10 @@ export async function resolvePolicy(tx: DbOrTx, employeeId: string, year: number
   const override = await tx.employeePolicyAssignment.findFirst({ where: { employeeId, ...effectiveOn(ref) }, orderBy: { effectiveFrom: "desc" } });
   const policyId = override?.policyId ?? level?.level.policyId;
   if (!policyId) return null;
-  const version = await versionOn(tx, policyId, ref);
+  // The current month follows the version in force today, so a change effective today applies right away
+  // (submitted plans keep their snapshot above). Other months use the version in force on day 1.
+  const today = todayJakarta();
+  const version = await versionOn(tx, policyId, today.slice(0, 7) === ref.slice(0, 7) ? today : ref);
   if (!version) return null;
   return { version, source: override ? "override" : "level", levelName: level?.level.name ?? null };
 }
@@ -127,14 +130,14 @@ export async function createPolicyVersion(actor: CurrentUser, policyId: string, 
 }
 
 /**
- * A version that hasn't taken effect yet can still be adjusted (rules and start date) or cancelled.
- * Once it is in effect, or a plan was submitted under it, changes go through a new version instead.
+ * A version starting today or later can still be adjusted (rules and start date) or cancelled.
+ * Once an earlier day was run under it, or a plan was submitted under it, changes go through a new version instead.
  */
 async function scheduledVersion(tx: DbOrTx, actor: CurrentUser, versionId: string) {
   if (!can(actor, "policy.manage")) throw forbidden();
   const v = await tx.policyVersion.findUnique({ where: { id: versionId }, include: { policy: { include: { versions: { orderBy: { effectiveFrom: "asc" } } } } } });
   if (!v) throw notFound("Policy version");
-  if (toISO(v.effectiveFrom) <= todayJakarta()) throw conflict("This version is already in effect. Create a new version to change it.");
+  if (toISO(v.effectiveFrom) < todayJakarta()) throw conflict("This version is already in effect. Create a new version to change it.");
   const used =
     (await tx.monthlySchedule.count({ where: { policyVersionId: v.id, status: { not: "DRAFT" } } })) +
     (await tx.scheduleVersion.count({ where: { policyVersionId: v.id } }));
@@ -151,7 +154,7 @@ export async function updatePolicyVersion(actor: CurrentUser, versionId: string,
   return withTx(async (tx) => {
     const { v, prev, next } = await scheduledVersion(tx, actor, versionId);
     const from = input.effectiveFrom;
-    if (from <= todayJakarta()) throw invalid("A scheduled version must start after today.");
+    if (from < todayJakarta()) throw invalid("A version can't be moved before today.");
     if (prev && from <= toISO(prev.effectiveFrom)) throw invalid(`Must start after v${prev.version} (${toISO(prev.effectiveFrom)}).`);
     if (next && from >= toISO(next.effectiveFrom)) throw invalid(`Must start before v${next.version} (${toISO(next.effectiveFrom)}).`);
     if (prev) await tx.policyVersion.update({ where: { id: prev.id }, data: { effectiveTo: fromISO(addDays(from, -1)) } });
