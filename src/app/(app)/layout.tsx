@@ -45,14 +45,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </aside>
       <div className="transition-[padding] lg:pl-[264px] lg:group-data-[sidebar=collapsed]/frame:pl-[76px]">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-line/70 bg-canvas/85 px-4 backdrop-blur sm:px-6 lg:px-8">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <MobileNav {...nav} />
             <SidebarToggle />
             <Link href="/" className="lg:hidden" aria-label="Home">
-              <Wordmark id="top" className="scale-90 origin-left" />
+              <Wordmark id="top" compact />
             </Link>
           </div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex shrink-0 items-center gap-2.5">
             <NotificationBell
               unread={unread}
               items={latest.map((n) => ({ id: n.id, title: n.title, body: n.body, link: n.link, createdAt: formatDateTime(n.createdAt), read: !!n.readAt }))}

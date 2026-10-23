@@ -66,6 +66,16 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Never scroll sideways: grid items may shrink below their content so long text truncates or wraps
+   instead of widening the page on phones. */
+html,
+body {
+  overflow-x: clip;
+}
+main .grid > * {
+  min-width: 0;
+}
+
 body {
   background: var(--color-canvas);
   color: var(--color-ink);

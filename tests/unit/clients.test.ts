@@ -51,7 +51,7 @@ describe("client period & status rules", () => {
   it("validates team assignments", () => {
     const base = { primary: "a", secondary: null, additional: [], adsStrategists: [] };
     expect(validateTeam(base, { status: "ACTIVE", requirePrimary: true, waived: false })).toEqual([]);
-    expect(validateTeam({ ...base, primary: null }, { status: "ACTIVE", requirePrimary: true, waived: false })[0]).toMatch(/Consultant 1/);
+    expect(validateTeam({ ...base, primary: null }, { status: "ACTIVE", requirePrimary: true, waived: false })[0]).toMatch(/Consultant/);
     expect(validateTeam({ ...base, primary: null }, { status: "ACTIVE", requirePrimary: true, waived: true })).toEqual([]);
     expect(validateTeam({ ...base, primary: null }, { status: "INACTIVE", requirePrimary: true, waived: false })).toEqual([]);
     expect(validateTeam({ ...base, adsStrategists: ["b", "c", "d", "e"] }, { status: "ACTIVE", requirePrimary: true, waived: false })[0]).toMatch(/at most 3/);

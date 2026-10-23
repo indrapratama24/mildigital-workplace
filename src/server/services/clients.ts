@@ -13,6 +13,8 @@ import {
   collaborationPeriod,
   teamRows,
   validateTeam,
+  displayStatus,
+  type ClientDisplayStatus,
   type ClientStatusT,
   type StatusPeriod,
   type TeamInput,
@@ -265,7 +267,7 @@ export async function createClient(actor: CurrentUser, input: CreateClientInput)
   if (dateOff && dateOff < input.dateStart) throw invalid("Date OFF can't be earlier than Date START.");
   const settings = await getSettings();
   const waived = !!input.waivePrimary;
-  if (waived && !clean(input.waiverReason)) throw invalid("Give a reason for the Consultant 1 exception.");
+  if (waived && !clean(input.waiverReason)) throw invalid("Give a reason for the Consultant exception.");
   const errs = validateTeam(input.team, { status: input.status, requirePrimary: settings.clientRequirePrimaryConsultant, waived });
   if (errs.length) throw invalid(errs.join(" "));
 
@@ -325,7 +327,7 @@ export async function updateClient(actor: CurrentUser, id: string, input: Update
   const today = todayJakarta();
   const settings = await getSettings();
   const waived = !!input.waivePrimary;
-  if (waived && !clean(input.waiverReason)) throw invalid("Give a reason for the Consultant 1 exception.");
+  if (waived && !clean(input.waiverReason)) throw invalid("Give a reason for the Consultant exception.");
 
   return withTx(async (tx) => {
     await lockBrand(tx, id);
@@ -366,8 +368,9 @@ export async function updateClient(actor: CurrentUser, id: string, input: Update
     if (input.status && input.status.status !== before.status) await applyStatusChange(tx, actor, brand.id, input.status, input.packageId);
     await changePackage(tx, actor, id, input.packageId, today);
     await syncAdAccounts(tx, id, input.adAccounts);
-    const teamFrom = input.teamEffectiveDate || today;
-    if (!isValidISO(teamFrom) || teamFrom > today) throw invalid("The team change date can't be in the future.");
+    // Clients in preparation: the team starts with the collaboration (Date START).
+    const teamFrom = input.dateStart > today ? input.dateStart : input.teamEffectiveDate || today;
+    if (!isValidISO(teamFrom) || (teamFrom > today && teamFrom !== input.dateStart)) throw invalid("The team change date can't be in the future.");
     if (teamFrom < input.dateStart) throw invalid("The team change date can't be before Date START.");
     const teamChanges = await syncTeam(tx, actor, id, input.team, teamFrom);
     await audit(tx, { actorUserId: actor.userId, action: "client.update", entityType: "ClientBrand", entityId: id, before, after: brand, metadata: { teamChanges } });
@@ -436,7 +439,7 @@ export async function changeClientStatus(actor: CurrentUser, id: string, input: 
     if (input.status === "ACTIVE") {
       const settings = await getSettings(tx);
       const primary = await tx.clientTeamAssignment.count({ where: { brandId: id, role: "CONSULTANT_PRIMARY", effectiveTo: null } });
-      if (settings.clientRequirePrimaryConsultant && !primary && !before.primaryConsultantWaived) throw invalid("Assign Consultant 1 (or record an exception) before activating the client.");
+      if (settings.clientRequirePrimaryConsultant && !primary && !before.primaryConsultantWaived) throw invalid("Assign a Consultant (or record an exception) before activating the client.");
     }
     await applyStatusChange(tx, actor, id, input, null);
     const after = await tx.clientBrand.findUniqueOrThrow({ where: { id } });
@@ -534,6 +537,8 @@ function shape(b: BrandWithTeam, today: ISODate) {
     name: b.name,
     organization: b.organization?.name ?? null,
     status: b.status as ClientStatusT,
+    /** Shown status: Preparation until Date START, then Active. */
+    displayStatus: displayStatus(b.status, dateStart, today),
     dateStart,
     dateOff,
     category: b.category?.name ?? null,
@@ -554,7 +559,7 @@ export type ClientRow = ReturnType<typeof shape>;
 
 export interface ClientFilters {
   q?: string;
-  status?: ClientStatusT | "ALL";
+  status?: ClientDisplayStatus | "ALL";
   packageId?: string;
   consultantId?: string;
   asId?: string;
@@ -572,7 +577,13 @@ export async function listClients(_viewer: CurrentUser, f: ClientFilters = {}) {
   const brands = await db.clientBrand.findMany({
     where: {
       archivedAt: null,
-      ...(f.status && f.status !== "ALL" ? { status: f.status } : {}),
+      ...(f.status === "PREPARATION"
+        ? { status: "ACTIVE" as const, dateStart: { gt: fromISO(today) } }
+        : f.status === "ACTIVE"
+          ? { status: "ACTIVE" as const, dateStart: { lte: fromISO(today) } }
+          : f.status && f.status !== "ALL"
+            ? { status: f.status }
+            : {}),
       ...(f.categoryId ? { categoryId: f.categoryId } : {}),
       ...(f.industryId ? { industryId: f.industryId } : {}),
       ...(f.adAccountId ? { adAccounts: { some: { typeId: f.adAccountId } } } : {}),
@@ -674,10 +685,11 @@ export type ClientDetail = Awaited<ReturnType<typeof getClient>>;
 export async function clientsForEmployee(employeeId: string) {
   const rows = await db.clientTeamAssignment.findMany({
     where: { employeeId, effectiveTo: null, brand: { archivedAt: null } },
-    include: { brand: { select: { id: true, name: true, clientCode: true, status: true } } },
+    include: { brand: { select: { id: true, name: true, clientCode: true, status: true, dateStart: true } } },
     orderBy: { brand: { name: "asc" } },
   });
-  return rows.map((r) => ({ id: r.brand.id, name: r.brand.name, clientCode: r.brand.clientCode, status: r.brand.status as ClientStatusT, role: r.role, since: toISO(r.effectiveFrom) }));
+  const today = todayJakarta();
+  return rows.map((r) => ({ id: r.brand.id, name: r.brand.name, clientCode: r.brand.clientCode, status: displayStatus(r.brand.status, toISO(r.brand.dateStart), today), role: r.role, since: toISO(r.effectiveFrom) }));
 }
 
 /** Active employees for consultant / AS pickers (from the Team Directory). */
@@ -735,7 +747,7 @@ export async function clientsExportCsv(viewer: CurrentUser, rows: ClientRow[]) {
       client_id: r.clientCode,
       brand_name: r.name,
       client_organization: r.organization,
-      status: r.status,
+      status: r.displayStatus,
       date_start: r.dateStart,
       date_off: r.dateOff,
       package: r.package?.name,

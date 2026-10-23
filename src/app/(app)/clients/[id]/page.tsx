@@ -42,7 +42,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <h1 className="font-display text-[28px] font-extrabold tracking-tight text-ink">{c.name}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-muted">
               <span className="font-mono">{c.clientCode}</span>
-              <Badge tone={STATUS_TONE[c.status]} dot>{CLIENT_STATUS_LABEL[c.status]}</Badge>
+              <Badge tone={STATUS_TONE[c.displayStatus]} dot>{CLIENT_STATUS_LABEL[c.displayStatus]}</Badge>
               {c.package && <Badge tone="brand">{c.package.name}</Badge>}
               {c.organization && <span>· {c.organization}</span>}
             </div>
@@ -50,7 +50,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         </div>
         {manage && (
           <div className="flex flex-wrap gap-2">
-            {openStatus && <ChangeStatusButton id={c.id} status={c.status} statusFrom={openStatus.from} dateStart={c.dateStart} today={today} />}
+            {openStatus && c.displayStatus !== "PREPARATION" && <ChangeStatusButton id={c.id} status={c.status} statusFrom={openStatus.from} dateStart={c.dateStart} today={today} />}
             <Link href={`/clients/${c.id}/edit`} className={buttonClass("primary")}>
               <Pencil className="h-4 w-4" /> Edit client
             </Link>
@@ -73,6 +73,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 <KV k="Days active" v={days(c.period.activeDays)} />
                 <KV k="Days frozen / inactive" v={c.period.frozenDays + c.period.inactiveDays ? `${days(c.period.frozenDays)} / ${days(c.period.inactiveDays)}` : "—"} />
               </div>
+              {c.displayStatus === "PREPARATION" && <Notice>Preparation — collaboration starts on {formatDate(c.dateStart)}. The client becomes Active automatically on that day and isn't counted in Active clients before then.</Notice>}
               {c.period.freezeSince && <Notice tone="warning">Frozen since {formatDate(c.period.freezeSince)} ({c.period.freezeLabel}). Freeze clients are reported separately from Active clients unless configured otherwise.</Notice>}
               {c.period.reactivated && <Notice>Reactivated client — earlier inactive periods are kept in the status history.</Notice>}
               {c.description && <p className="whitespace-pre-line text-[14px] leading-relaxed text-ink-2">{c.description}</p>}
@@ -151,8 +152,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <Card>
             <CardHeader title="Assigned team" />
             <CardBody className="space-y-3">
-              <TeamLine label="Consultant 1" people={c.consultant1 ? [c.consultant1] : []} />
-              {c.primaryConsultantWaived && <Notice tone="warning">Exception: active without Consultant 1{c.waiverReason ? ` — ${c.waiverReason}` : ""}.</Notice>}
+              <TeamLine label="Consultant" people={c.consultant1 ? [c.consultant1] : []} />
+              {c.primaryConsultantWaived && <Notice tone="warning">Exception: active without Consultant{c.waiverReason ? ` — ${c.waiverReason}` : ""}.</Notice>}
               <TeamLine label="Consultant 2" people={c.consultant2 ? [c.consultant2] : []} />
               <TeamLine label="Additional consultants" people={c.additional} />
               <TeamLine label={`Ads Strategists (${c.adsStrategists.length}/3)`} people={c.adsStrategists} />

@@ -227,7 +227,7 @@ Scope = All / one department / one team; an event is “within scope” when eve
 **Dated history (never rewritten)**
 - `ClientStatusHistory` — effective-dated periods (one open period per brand, enforced by a partial unique index; rows can't be deleted). `ClientBrand.status`/`dateOff` are a cache written in the same transaction. Status changes take an effective date (≤ today, after the current period's start) and an optional reason; Inactive requires Date OFF (last collaboration day, ≥ Date START) and starts the next day. Freeze can't follow Inactive (reactivate first).
 - `ClientEngagementPackage` — effective-dated package per engagement (one open row). Package changes start today; same-day corrections overwrite.
-- `ClientTeamAssignment` — role per employee per brand with start/end dates. Removal or role change closes the row (never deleted). DB guarantees: one current role per employee per client, one current Consultant 1 and one Consultant 2, max 3 current Ads Strategists (trigger, plus a row lock in the service).
+- `ClientTeamAssignment` — role per employee per brand with start/end dates. Removal or role change closes the row (never deleted). DB guarantees: one current role per employee per client, one current Consultant and one Consultant 2, max 3 current Ads Strategists (trigger, plus a row lock in the service).
 - **Date START** is the first collaboration day and is never changed by reactivation (editable by client managers; it moves the first status/engagement/package rows with it).
 
 **Period & counting rules** (`src/lib/engine/clients.ts`, `src/server/services/client-metrics.ts`)
@@ -237,9 +237,11 @@ Scope = All / one department / one team; an event is “within scope” when eve
 
 **Access**: everyone sees brand info, status, package and team; PIC contact & internal notes only with `client.sensitive` or while assigned to the client; create/edit/status/assign/archive need `client.manage`; CSV export (`/api/clients/export`, audited, formula-injection safe) needs `client.export`; packages & rules need `clientPackage.manage`. Archive (soft delete) is for mistaken records only.
 
+**Preparation**: a derived status (never stored) — an Active client whose Date START is still in the future shows as *Preparation* and turns Active by itself on that day. Preparation clients aren't counted in Active/Total until they start (the portfolio shows them as a separate count); the directory can filter by it; the form offers “Preparation (starts later)”; import/export use `PREPARATION` for these rows. Status changes are only possible once the client has started; team edits before then start with the collaboration.
+
 **Team change date**: when the team changes on edit, a "Team change effective from" date (≤ today, ≥ Date START) is asked; new roles start that day and removed ones end the day before.
 
-**Portfolio highlights**: the breakdown charts (package, category, industry, sub-industry, Consultant 1, Ads Strategist, ad account) are chosen and ordered by client package admins (`clientHighlights` setting, max 6).
+**Portfolio highlights**: the breakdown charts (package, category, industry, sub-industry, Consultant, Ads Strategist, ad account) are chosen and ordered by client package admins (`clientHighlights` setting, max 6).
 
 **Classification & ad accounts**: `ClientCategory` (Retail-Fashion, Retail-Non Fashion, B2B & Services, F&B — editable) → `ClientIndustry` → `ClientSubIndustry`. Industry/sub-industry names typed on a client are found case-insensitively or created, so they're reused by other brands; admins can rename, re-file or delete unused ones. `ClientAdAccountType` (Meta Regular, Meta CPAS Shopee, Iklanku Shopee, GMV Max TikTok, TTAM, plus any added) linked via `ClientBrandAdAccount`. Client PIC contact is split into `picPhone` and `picEmail` (for future CRM activities).
 

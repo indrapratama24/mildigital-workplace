@@ -107,7 +107,7 @@ describe("Client records", () => {
     const m = await manager();
     await expectError(createClient(m, input({ status: "INACTIVE" })), "VALIDATION", /Date OFF is required/);
     await expectError(createClient(m, input({ status: "INACTIVE", dateOff: "2025-01-01" })), "VALIDATION", /earlier than Date START/);
-    await expectError(createClient(m, input({ team: { primary: null, secondary: null, additional: [], adsStrategists: [] } })), "VALIDATION", /Consultant 1/);
+    await expectError(createClient(m, input({ team: { primary: null, secondary: null, additional: [], adsStrategists: [] } })), "VALIDATION", /Consultant/);
     await expectError(
       createClient(m, input({ team: { primary: org.ids.principal, secondary: null, additional: [], adsStrategists: [org.ids.junior, org.ids.peer, org.ids.leader2, org.ids.hr] } })),
       "VALIDATION",
@@ -141,7 +141,7 @@ describe("Client records", () => {
     const m = await manager();
     const c = await createClient(m, input({ picName: "Pak Demo", picPhone: "+62 800 1234", picEmail: "Pic@Brand.id", internalNotes: "Renewal risk" }));
     expect((await getClient(await org.actor("junior"), c.id)).picPhone).toBeNull();
-    const assigned = await getClient(await org.actor("principal"), c.id); // Consultant 1
+    const assigned = await getClient(await org.actor("principal"), c.id); // Consultant
     expect([assigned.picPhone, assigned.picEmail]).toEqual(["+62 800 1234", "pic@brand.id"]);
     expect((await getClient(m, c.id)).picEmail).toBeNull(); // client.manage alone doesn't include client.sensitive
     await expectError(createClient(m, input({ name: "Bad", picEmail: "not-an-email" })), "VALIDATION", /PIC email/);
@@ -307,7 +307,7 @@ describe("Client team change date", () => {
   it("records a PIC change from the chosen date and rejects future dates", async () => {
     const m = await manager();
     const c = await createClient(m, input({ dateStart: "2025-01-01" }));
-    // created today (2 Nov 2026); move Consultant 1 to someone else effective 2 Nov, add an AS from 2 Nov
+    // created today (2 Nov 2026); move Consultant to someone else effective 2 Nov, add an AS from 2 Nov
     await updateClient(m, c.id, { ...upd(c.clientCode, { dateStart: "2025-01-01", team: { primary: org.ids.peer, secondary: null, additional: [], adsStrategists: [org.ids.junior] } }), teamEffectiveDate: "2026-11-02" });
     await expectError(updateClient(m, c.id, { ...upd(c.clientCode, { dateStart: "2025-01-01" }), teamEffectiveDate: "2026-12-01" }), "VALIDATION", /future/);
     const hist = (await getClient(m, c.id)).assignmentHistory;
@@ -315,5 +315,28 @@ describe("Client team change date", () => {
       [[org.ids.peer, "CONSULTANT_PRIMARY", "2026-11-02"], [org.ids.junior, "ADS_STRATEGIST", "2026-11-02"]].sort(),
     );
     expect(hist.find((a) => a.employee.id === org.ids.principal)?.to).toBe("2026-11-02"); // started the same day → closed that day
+  });
+});
+
+describe("Preparation status", () => {
+  it("clients with a future Date START are in preparation and become active on that day", async () => {
+    const m = await manager();
+    const c = await createClient(m, input({ name: "Soon Brand", dateStart: "2026-11-20" }));
+    await createClient(m, input({ name: "Live Brand", dateStart: "2026-01-01" }));
+    let rows = (await listClients(m, { sort: "name" })).rows;
+    expect(rows.map((r) => [r.name, r.displayStatus, r.period.label])).toEqual([["Live Brand", "ACTIVE", "10 mo"], ["Soon Brand", "PREPARATION", "Starts soon"]]);
+    expect((await listClients(m, { status: "PREPARATION" })).rows.map((r) => r.name)).toEqual(["Soon Brand"]);
+    expect((await listClients(m, { status: "ACTIVE" })).rows.map((r) => r.name)).toEqual(["Live Brand"]);
+    const nov = await portfolioSummary(2026, 11);
+    expect([nov.active, nov.preparation, nov.total]).toEqual([1, 1, 1]);
+    // team edits on a client in preparation start with the collaboration
+    await updateClient(m, c.id, upd(c.clientCode, { name: "Soon Brand", dateStart: "2026-11-20", team: { primary: org.ids.peer, secondary: null, additional: [], adsStrategists: [] } }));
+
+    vi.setSystemTime(new Date("2026-11-20T03:00:00Z"));
+    rows = (await listClients(m, { sort: "name" })).rows;
+    expect(rows.find((r) => r.name === "Soon Brand")?.displayStatus).toBe("ACTIVE");
+    const after = await portfolioSummary(2026, 11);
+    expect([after.active, after.preparation]).toEqual([2, 0]);
+    vi.setSystemTime(new Date("2026-11-02T03:00:00Z"));
   });
 });

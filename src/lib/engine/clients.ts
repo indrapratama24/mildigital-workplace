@@ -107,8 +107,8 @@ export function validateTeam(t: TeamInput, opts: { status: ClientStatusT; requir
   const all = [t.primary, t.secondary, ...t.additional, ...t.adsStrategists].filter((x): x is string => !!x);
   if (new Set(all).size !== all.length) errors.push("Each employee can hold only one role on a client.");
   if (t.adsStrategists.length > MAX_ADS_STRATEGISTS) errors.push(`A client can have at most ${MAX_ADS_STRATEGISTS} Ads Strategists.`);
-  if (!t.primary && t.secondary) errors.push("Assign Consultant 1 before Consultant 2.");
-  if (opts.status === "ACTIVE" && opts.requirePrimary && !t.primary && !opts.waived) errors.push("Active clients need Consultant 1 (or an approved exception).");
+  if (!t.primary && t.secondary) errors.push("Assign a Consultant before Consultant 2.");
+  if (opts.status === "ACTIVE" && opts.requirePrimary && !t.primary && !opts.waived) errors.push("Active clients need a Consultant (or an approved exception).");
   return errors;
 }
 
@@ -123,10 +123,17 @@ export function teamRows(t: TeamInput): { employeeId: string; role: ClientRoleT 
 }
 
 export const CLIENT_ROLE_LABEL: Record<ClientRoleT, string> = {
-  CONSULTANT_PRIMARY: "Consultant 1",
+  CONSULTANT_PRIMARY: "Consultant",
   CONSULTANT_SECONDARY: "Consultant 2",
   CONSULTANT_ADDITIONAL: "Additional Consultant",
   ADS_STRATEGIST: "Ads Strategist",
 };
 
-export const CLIENT_STATUS_LABEL: Record<ClientStatusT, string> = { ACTIVE: "Active", INACTIVE: "Inactive", FREEZE: "Freeze" };
+/** Status shown to people: an Active client whose Date START is still ahead is in Preparation. */
+export type ClientDisplayStatus = ClientStatusT | "PREPARATION";
+
+/** Derived, never stored: Preparation turns into Active by itself on Date START. */
+export const displayStatus = (status: ClientStatusT, dateStart: ISODate, today: ISODate): ClientDisplayStatus =>
+  status === "ACTIVE" && dateStart > today ? "PREPARATION" : status;
+
+export const CLIENT_STATUS_LABEL: Record<ClientDisplayStatus, string> = { ACTIVE: "Active", INACTIVE: "Inactive", FREEZE: "Freeze", PREPARATION: "Preparation" };

@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Briefcase, CircleCheck, CirclePause, CircleX, Download, Layers, Megaphone, Plus, Shapes, Sparkles, Tag, Upload, UserRound, Users } from "lucide-react";
+import { Briefcase, CircleCheck, CirclePause, CircleX, Download, Hourglass, Layers, Megaphone, Plus, Shapes, Sparkles, Tag, Upload, UserRound, Users } from "lucide-react";
 import { requirePageUser } from "@/server/auth/guard";
 import { can } from "@/server/authz";
 import { clientFilterOptions, listClients, type ClientFilters } from "@/server/services/clients";
 import { PORTFOLIO_BREAKDOWNS, portfolioSummary, type PortfolioBreakdown } from "@/server/services/client-metrics";
 import { getSettings } from "@/server/services/settings";
 import { HighlightsEditor } from "@/components/app/clients/highlights-editor";
+import { FilterBar } from "@/components/app/filter-bar";
 import { addMonths, currentMonthJakarta, formatDate, formatMonth, monthParam, parseMonthParam } from "@/lib/dates";
 import { CLIENT_STATUS_LABEL } from "@/lib/engine/clients";
 import { STATUS_TONE } from "@/components/app/clients/status";
@@ -13,7 +14,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Avatar, AvatarGroup, EmptyState, PageHeader, Stat, Table } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
 import { buttonClass } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/field";
+import { Select } from "@/components/ui/field";
 
 export const metadata = { title: "Client & Portfolio" };
 
@@ -86,8 +87,9 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
           {!isCurrent && <Link href={qs({ month: monthParam(next.year, next.month), page: undefined })} className="rounded-full px-3 py-1 text-ink-2 hover:text-brand-700">{formatMonth(next.year, next.month)} →</Link>}
         </div>
       </div>
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Active clients" value={summary.active} icon={CircleCheck} tone="success" hint={summary.freezeCountsAsActive ? "incl. freeze" : undefined} />
+        <Stat label="Preparation" value={summary.preparation} icon={Hourglass} hint="starting soon — not counted yet" />
         <Stat label="Freeze" value={summary.freeze} icon={CirclePause} hint={summary.freezeCountsAsActive ? "counted as active" : "not counted as active"} />
         <Stat label="Inactive" value={summary.inactive} icon={CircleX} />
         <Stat label="Total clients" value={summary.total} icon={Briefcase} tone="brand" />
@@ -109,52 +111,56 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
       )}
 
       <Card>
-        <form className="flex flex-wrap gap-2 p-4" method="get">
-          {sp.month && <input type="hidden" name="month" value={sp.month} />}
-          <Input name="q" defaultValue={sp.q} placeholder="Search brand or Client ID" className="h-9 w-[220px]" />
-          <Select name="status" defaultValue={sp.status ?? "ALL"} className="h-9 w-auto">
+        <FilterBar
+          search={{ name: "q", value: sp.q, placeholder: "Search brand or Client ID" }}
+          activeCount={[sp.q, sp.status && sp.status !== "ALL" ? sp.status : undefined, sp.package, sp.consultant, sp.as, sp.category, sp.industry, sp.ad].filter(Boolean).length}
+          resetHref={sp.month ? `/clients?month=${sp.month}` : "/clients"}
+          hidden={{ month: sp.month }}
+          right={
+            <Select name="sort" defaultValue={sp.sort ?? "name"} className="h-10 w-auto" aria-label="Sort">
+              <option value="name">Sort: Brand A–Z</option>
+              <option value="code">Sort: Client ID</option>
+              <option value="start_desc">Sort: Date START (newest)</option>
+              <option value="start_asc">Sort: Date START (oldest)</option>
+              <option value="period_desc">Sort: Period (longest)</option>
+              <option value="period_asc">Sort: Period (shortest)</option>
+            </Select>
+          }
+        >
+          <Select name="status" defaultValue={sp.status ?? "ALL"} aria-label="Status">
             <option value="ALL">All statuses</option>
+            <option value="PREPARATION">Preparation</option>
             <option value="ACTIVE">Active</option>
             <option value="FREEZE">Freeze</option>
             <option value="INACTIVE">Inactive</option>
           </Select>
-          <Select name="package" defaultValue={sp.package ?? ""} className="h-9 w-auto">
+          <Select name="package" defaultValue={sp.package ?? ""} aria-label="Package">
             <option value="">All packages</option>
             {opts.packages.map((p) => <option key={p.id} value={p.id}>{p.name}{p.isActive ? "" : " (archived)"}</option>)}
           </Select>
-          <Select name="consultant" defaultValue={sp.consultant ?? ""} className="h-9 w-auto">
-            <option value="">All consultants</option>
-            {opts.consultants.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
-          </Select>
-          <Select name="as" defaultValue={sp.as ?? ""} className="h-9 w-auto">
-            <option value="">All Ads Strategists</option>
-            {opts.adsStrategists.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
-          </Select>
-          <Select name="category" defaultValue={sp.category ?? ""} className="h-9 w-auto">
+          <Select name="category" defaultValue={sp.category ?? ""} aria-label="Category">
             <option value="">All categories</option>
             {opts.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
-          <Select name="industry" defaultValue={sp.industry ?? ""} className="h-9 w-auto">
+          <Select name="industry" defaultValue={sp.industry ?? ""} aria-label="Industry">
             <option value="">All industries</option>
             {opts.industries.filter((i) => !sp.category || i.categoryId === sp.category).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           </Select>
-          <Select name="ad" defaultValue={sp.ad ?? ""} className="h-9 w-auto">
+          <Select name="consultant" defaultValue={sp.consultant ?? ""} aria-label="Consultant">
+            <option value="">All consultants</option>
+            {opts.consultants.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+          </Select>
+          <Select name="as" defaultValue={sp.as ?? ""} aria-label="Ads Strategist">
+            <option value="">All Ads Strategists</option>
+            {opts.adsStrategists.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+          </Select>
+          <Select name="ad" defaultValue={sp.ad ?? ""} aria-label="Ad account">
             <option value="">All ad accounts</option>
             {opts.adAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </Select>
-          <Select name="sort" defaultValue={sp.sort ?? "name"} className="h-9 w-auto" aria-label="Sort">
-            <option value="name">Sort: Brand A–Z</option>
-            <option value="code">Sort: Client ID</option>
-            <option value="start_desc">Sort: Date START (newest)</option>
-            <option value="start_asc">Sort: Date START (oldest)</option>
-            <option value="period_desc">Sort: Period (longest)</option>
-            <option value="period_asc">Sort: Period (shortest)</option>
-          </Select>
-          <button className={buttonClass("primary", "sm", "h-9")}>Apply</button>
-          {Object.keys(sp).some((k) => k !== "month") && <Link href={sp.month ? `/clients?month=${sp.month}` : "/clients"} className={buttonClass("ghost", "sm", "h-9")}>Reset</Link>}
-        </form>
+        </FilterBar>
         {list.rows.length === 0 ? (
-          <EmptyState icon={Briefcase} title={list.total === 0 && !sp.q ? "No clients yet" : "No clients match these filters"} description={can(me, "client.manage") ? "Add the first client to start the portfolio." : undefined} className="m-4" />
+          <EmptyState icon={Briefcase} title={list.total === 0 && !Object.keys(sp).some((k) => k !== "month" && k !== "sort") ? "No clients yet" : "No clients match these filters"} description={can(me, "client.manage") ? "Add the first client to start the portfolio." : undefined} className="m-4" />
         ) : (
           <div className="px-2 pb-3">
             <Table className="min-w-[1060px] [&_td]:whitespace-nowrap">
@@ -166,7 +172,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                   <th>Package</th>
                   <th>Date START</th>
                   <th>Period</th>
-                  <th>Consultant 1</th>
+                  <th>Consultant</th>
                   <th>Consultant 2</th>
                   <th>AS assigned</th>
                   <th className="text-right">Actions</th>
@@ -180,7 +186,10 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                       <Link href={`/clients/${r.id}`} className="font-medium text-ink hover:text-brand-700">{r.name}</Link>
                       {(r.industry || r.category) && <div className="text-[11.5px] text-muted">{[r.category, r.industry, r.subIndustry].filter(Boolean).join(" · ")}</div>}
                     </td>
-                    <td><Badge tone={STATUS_TONE[r.status]} dot>{CLIENT_STATUS_LABEL[r.status]}</Badge></td>
+                    <td>
+                      <Badge tone={STATUS_TONE[r.displayStatus]} dot>{CLIENT_STATUS_LABEL[r.displayStatus]}</Badge>
+                      {r.displayStatus === "PREPARATION" && <div className="mt-0.5 text-[11px] text-muted">starts {formatDate(r.dateStart)}</div>}
+                    </td>
                     <td>{r.package?.name ?? <span className="text-subtle">—</span>}</td>
                     <td>{formatDate(r.dateStart)}</td>
                     <td>

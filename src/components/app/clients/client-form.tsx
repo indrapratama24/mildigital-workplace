@@ -11,7 +11,7 @@ import { Notice } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { collaborationPeriod, MAX_ADS_STRATEGISTS, validateTeam, type ClientStatusT } from "@/lib/engine/clients";
-import { formatDate } from "@/lib/dates";
+import { addDays, formatDate } from "@/lib/dates";
 import type { ClientFormValues, TaxonomyOptions } from "./form-values";
 
 type Person = { id: string; fullName: string; jobTitle: string };
@@ -65,6 +65,7 @@ export function ClientForm({
   const teamOf = (v: ClientFormValues) => JSON.stringify([v.primary, v.secondary, [...v.additional].filter(Boolean).sort(), [...v.adsStrategists].sort()]);
   const teamChanged = mode === "edit" && teamOf(f) !== teamOf(initial);
   const statusChanged = mode === "edit" && f.status !== initial.status;
+  const preparing = f.status === "ACTIVE" && !!f.dateStart && f.dateStart > today;
 
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => {
@@ -82,7 +83,7 @@ export function ClientForm({
   if (!f.packageId) errors.push("Choose a package.");
   if (f.status === "INACTIVE" && (mode === "create" || statusChanged) && !f.dateOff) errors.push("Date OFF is required for inactive clients.");
   if (f.dateOff && f.dateStart && f.dateOff < f.dateStart) errors.push("Date OFF can't be earlier than Date START.");
-  if (f.waivePrimary && !f.waiverReason.trim()) errors.push("Give a reason for the Consultant 1 exception.");
+  if (f.waivePrimary && !f.waiverReason.trim()) errors.push("Give a reason for the Consultant exception.");
   errors.push(...teamErrors);
 
   const period = useMemo(() => {
@@ -176,14 +177,27 @@ export function ClientForm({
         <CardHeader title="B. Collaboration details" description="Period is calculated automatically from Date START and status history." />
         <CardBody className="grid gap-4 sm:grid-cols-3">
           <Field label="Status" required>
-            <Select value={f.status} onChange={(e) => set("status", e.target.value as ClientStatusT)}>
+            <Select
+              value={preparing ? "PREPARATION" : f.status}
+              onChange={(e) => {
+                const v = e.target.value;
+                // Preparation = Active with a Date START in the future; it turns Active by itself on that day.
+                if (v === "PREPARATION") setF((p) => ({ ...p, status: "ACTIVE", dateStart: p.dateStart > today ? p.dateStart : addDays(today, 1) }));
+                else setF((p) => ({ ...p, status: v as ClientStatusT, dateStart: v === "ACTIVE" && p.dateStart > today && initial.dateStart <= today ? today : p.dateStart }));
+              }}
+            >
+              {(mode === "create" || initial.dateStart > today) && <option value="PREPARATION">Preparation (starts later)</option>}
               <option value="ACTIVE">Active</option>
               <option value="FREEZE" disabled={mode === "edit" && initial.status === "INACTIVE"}>Freeze</option>
               <option value="INACTIVE">Inactive</option>
             </Select>
           </Field>
-          <Field label="Date START" required hint="First day of collaboration. Reactivation never changes it.">
-            <Input type="date" value={f.dateStart} onChange={(e) => set("dateStart", e.target.value)} max={today} />
+          <Field
+            label="Date START"
+            required
+            hint={preparing ? `In preparation until then — becomes Active automatically on ${formatDate(f.dateStart)}.` : "First day of collaboration. Reactivation never changes it."}
+          >
+            <Input type="date" value={f.dateStart} onChange={(e) => set("dateStart", e.target.value)} max={f.status === "ACTIVE" ? undefined : today} />
           </Field>
           {f.status === "INACTIVE" && (mode === "create" || statusChanged || initial.status === "INACTIVE") ? (
             <Field label="Date OFF" required hint="Last day of collaboration">
@@ -265,7 +279,7 @@ export function ClientForm({
       <Card>
         <CardHeader title="D. Assigned team" description="People come from the Team Directory. Changes are kept in the assignment history." />
         <CardBody className="grid gap-4 sm:grid-cols-2">
-          <Field label="Consultant 1 (Primary)" required={f.status === "ACTIVE" && requirePrimary && !f.waivePrimary}>
+          <Field label="Consultant" required={f.status === "ACTIVE" && requirePrimary && !f.waivePrimary}>
             <PersonSelect value={f.primary} onChange={(v) => set("primary", v)} people={options(f.primary)} />
           </Field>
           <Field label="Consultant 2 (Secondary)">
@@ -313,7 +327,7 @@ export function ClientForm({
           )}
           {f.status === "ACTIVE" && requirePrimary && (
             <div className="space-y-2 sm:col-span-2">
-              <Checkbox checked={f.waivePrimary} onChange={(e) => set("waivePrimary", e.target.checked)} label="Exception: active without Consultant 1" description="Recorded with your name in the audit log." />
+              <Checkbox checked={f.waivePrimary} onChange={(e) => set("waivePrimary", e.target.checked)} label="Exception: active without Consultant" description="Recorded with your name in the audit log." />
               {f.waivePrimary && <Input value={f.waiverReason} onChange={(e) => set("waiverReason", e.target.value)} placeholder="Reason for the exception" />}
             </div>
           )}

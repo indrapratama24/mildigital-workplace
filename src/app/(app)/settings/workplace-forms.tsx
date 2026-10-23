@@ -68,7 +68,7 @@ export function ClientRulesForm({ initial }: { initial: { clientRequirePrimaryCo
   const { pending, run } = useRun();
   return (
     <div className="space-y-3">
-      <Checkbox checked={f.clientRequirePrimaryConsultant} onChange={(e) => setF({ ...f, clientRequirePrimaryConsultant: e.target.checked })} label="Active clients require Consultant 1" description="Client managers can still record an explicit, audited exception per client." />
+      <Checkbox checked={f.clientRequirePrimaryConsultant} onChange={(e) => setF({ ...f, clientRequirePrimaryConsultant: e.target.checked })} label="Active clients require a Consultant" description="Client managers can still record an explicit, audited exception per client." />
       <Checkbox checked={f.clientFreezeCountsAsActive} onChange={(e) => setF({ ...f, clientFreezeCountsAsActive: e.target.checked })} label="Count Freeze clients as Active" description="Off (default): Freeze is reported separately and excluded from Active Clients." />
       <Button loading={pending} onClick={() => run(() => W.updateClientRulesAction(f))}>Save rules</Button>
     </div>

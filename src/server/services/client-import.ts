@@ -125,11 +125,14 @@ export async function importClientsCsv(actor: CurrentUser, text: string, dryRun 
       adsStrategists: list(r.ads_strategists).map((v) => person(v, "ads_strategists")).filter((x): x is string => !!x),
     };
     const statusRaw = (r.status ?? "").trim().toUpperCase();
-    const status = (statusRaw === "" ? (existing?.status ?? "ACTIVE") : statusRaw) as ClientStatusT;
-    if (!["ACTIVE", "INACTIVE", "FREEZE"].includes(status)) err(`status must be Active, Inactive or Freeze (got “${r.status}”).`);
+    // Preparation = Active with a Date START in the future (it turns Active on that day).
+    const preparing = statusRaw === "PREPARATION";
+    const status = (statusRaw === "" ? (existing?.status ?? "ACTIVE") : preparing ? "ACTIVE" : statusRaw) as ClientStatusT;
+    if (!["ACTIVE", "INACTIVE", "FREEZE"].includes(status)) err(`status must be Preparation, Active, Inactive or Freeze (got “${r.status}”).`);
     const dateStart = parseDate(r.date_start) ?? (existing ? toISO(existing.dateStart) : null);
     const dateOff = parseDate(r.date_off);
     if (!dateStart) err("date_start is required.");
+    if (preparing && dateStart && dateStart !== "invalid" && dateStart <= today) err("Preparation clients need a date_start in the future.");
     if (dateStart === "invalid") err("date_start must be YYYY-MM-DD or DD/MM/YYYY.");
     if (dateOff === "invalid") err("date_off must be YYYY-MM-DD or DD/MM/YYYY.");
     const pkgName = opt(r.package);

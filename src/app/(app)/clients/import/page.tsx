@@ -15,7 +15,7 @@ const FIELDS: [string, string][] = [
   ["client_id", "Empty = new client (ID generated). An existing Client ID updates that client."],
   ["brand_name", "Required."],
   ["client_organization", "Optional legal/business owner."],
-  ["status", "Active, Inactive or Freeze (new clients). Status of existing clients is changed on the client page."],
+  ["status", "Preparation (future date_start), Active, Inactive or Freeze for new clients. Status of existing clients is changed on the client page."],
   ["date_start / date_off", "YYYY-MM-DD or DD/MM/YYYY. date_off is required for Inactive."],
   ["package", "Name of an existing package."],
   ["category", "Name of an existing category."],

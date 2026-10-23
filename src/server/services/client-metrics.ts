@@ -12,6 +12,8 @@ async function brandsWithHistory() {
     select: {
       id: true,
       name: true,
+      status: true,
+      createdAt: true,
       industry: { select: { id: true, name: true } },
       category: { select: { id: true, name: true } },
       dateStart: true,
@@ -60,10 +62,13 @@ export async function portfolioSummary(year: number, month: number) {
     for (const b of activeNow) for (const k of keyOf(b)) m.set(k.key, { label: k.label, count: (m.get(k.key)?.count ?? 0) + 1 });
     return [...m.entries()].map(([key, v]) => ({ key, ...v })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   };
+  // Preparation: signed clients whose Date START is still ahead (recorded by then, not yet active).
+  const preparation = brands.filter((b) => b.status === "ACTIVE" && toISO(b.dateStart) > asOf && toISO(b.createdAt) <= asOf).length;
   return {
     asOf,
     freezeCountsAsActive: settings.clientFreezeCountsAsActive,
     ...counts,
+    preparation,
     newThisPeriod: newClients.length,
     newClients: newClients.map((b) => ({ id: b.id, name: b.name, dateStart: toISO(b.dateStart) })),
     byPackage: tally((b) => {
@@ -72,8 +77,9 @@ export async function portfolioSummary(year: number, month: number) {
     }),
     byCategory: tally((b) => [{ key: b.category?.id ?? "none", label: b.category?.name ?? "Not set" }]),
     byIndustry: tally((b) => [{ key: b.industry?.id ?? "none", label: b.industry?.name ?? "Not set" }]),
+    // Every consultant role counts (Consultant, Consultant 2, additional) — one client per person.
     byConsultant: tally((b) =>
-      b.assignments.filter((a) => a.role === "CONSULTANT_PRIMARY" && covers(a, asOf)).map((a) => ({ key: a.employee.id, label: a.employee.fullName })),
+      b.assignments.filter((a) => a.role !== "ADS_STRATEGIST" && covers(a, asOf)).map((a) => ({ key: a.employee.id, label: a.employee.fullName })),
     ),
     byAdsStrategist: tally((b) => b.assignments.filter((a) => a.role === "ADS_STRATEGIST" && covers(a, asOf)).map((a) => ({ key: a.employee.id, label: a.employee.fullName }))),
     bySubIndustry: tally((b) => [{ key: b.subIndustry?.id ?? "none", label: b.subIndustry?.name ?? "Not set" }]),
@@ -119,7 +125,7 @@ export const PORTFOLIO_BREAKDOWNS = {
   category: { title: "Active by category", key: "byCategory" },
   industry: { title: "Active by industry", key: "byIndustry" },
   subIndustry: { title: "Active by sub-industry", key: "bySubIndustry" },
-  consultant: { title: "Active by Consultant 1", key: "byConsultant" },
+  consultant: { title: "Active by consultant", key: "byConsultant" },
   adsStrategist: { title: "Active by Ads Strategist", key: "byAdsStrategist" },
   adAccount: { title: "Active by ad account", key: "byAdAccount" },
 } as const;

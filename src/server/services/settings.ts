@@ -16,7 +16,7 @@ export interface AppSettings {
   calendarVisibility: "ALL" | "ASSIGNED";
   /** MIL Academy (Knowledge Hub) URL; null = platform still in development. */
   knowledgeHubUrl: string | null;
-  /** Active clients need Consultant 1 unless an authorised exception is recorded. */
+  /** Active clients need a Consultant unless an authorised exception is recorded. */
   clientRequirePrimaryConsultant: boolean;
   /** Counting rule: whether Freeze clients are included in "Active clients". */
   clientFreezeCountsAsActive: boolean;

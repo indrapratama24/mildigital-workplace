@@ -9,9 +9,10 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Avatar, EmptyState, PageHeader, Stat, Table } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
 import { buttonClass } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/field";
+import { Select } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
 import { LeadersEditor } from "./leaders-editor";
+import { FilterBar } from "@/components/app/filter-bar";
 
 export const metadata = { title: "Team Directory" };
 
@@ -145,39 +146,42 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
       </div>
 
       <Card>
-        <form className="flex flex-wrap gap-2 p-4" method="get">
-          <Input name="q" defaultValue={sp.q} placeholder="Search name, nickname, ID or role" className="h-9 w-[240px]" />
-          <Select name="team" defaultValue={sp.team ?? ""} className="h-9 w-auto">
+        <FilterBar
+          search={{ name: "q", value: sp.q, placeholder: "Search name, nickname, ID or role" }}
+          activeCount={[sp.q, sp.team, sp.department, sp.level, sp.role, sp.status && sp.status !== "active" ? sp.status : undefined].filter(Boolean).length}
+          resetHref={view === "teams" ? "/directory?view=teams" : "/directory"}
+          hidden={{ view: view === "teams" ? "teams" : undefined }}
+          right={
+            <span className="flex items-center gap-1 rounded-full border border-line bg-white p-1 text-[12.5px]">
+              <Link href={viewHref("list")} className={cn("rounded-full px-3 py-1 font-medium", view === "list" ? "bg-brand-700 text-white" : "text-ink-2 hover:text-brand-700")}>List</Link>
+              <Link href={viewHref("teams")} className={cn("rounded-full px-3 py-1 font-medium", view === "teams" ? "bg-brand-700 text-white" : "text-ink-2 hover:text-brand-700")}>By team</Link>
+            </span>
+          }
+        >
+          <Select name="team" defaultValue={sp.team ?? ""} aria-label="Team">
             <option value="">All teams</option>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
-          <Select name="department" defaultValue={sp.department ?? ""} className="h-9 w-auto">
+          <Select name="department" defaultValue={sp.department ?? ""} aria-label="Department">
             <option value="">All departments</option>
             {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </Select>
-          <Select name="level" defaultValue={sp.level ?? ""} className="h-9 w-auto">
+          <Select name="level" defaultValue={sp.level ?? ""} aria-label="Level">
             <option value="">All levels</option>
             {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </Select>
-          <Select name="role" defaultValue={sp.role ?? ""} className="h-9 w-auto">
+          <Select name="role" defaultValue={sp.role ?? ""} aria-label="Role">
             <option value="">All roles</option>
             {titles.map((t) => <option key={t.jobTitle} value={t.jobTitle}>{t.jobTitle}</option>)}
           </Select>
           {isHR && (
-            <Select name="status" defaultValue={sp.status ?? "active"} className="h-9 w-auto">
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="all">All</option>
+            <Select name="status" defaultValue={sp.status ?? "active"} aria-label="Status">
+              <option value="active">Active people</option>
+              <option value="inactive">Inactive people</option>
+              <option value="all">Everyone</option>
             </Select>
           )}
-          {view === "teams" && <input type="hidden" name="view" value="teams" />}
-          <button className={buttonClass("primary", "sm", "h-9")}>Filter</button>
-          {(sp.q || sp.team || sp.level || sp.status || sp.department || sp.role) && <Link href={view === "teams" ? "/directory?view=teams" : "/directory"} className={buttonClass("ghost", "sm", "h-9")}>Reset</Link>}
-          <span className="ml-auto flex items-center gap-1 rounded-full border border-line bg-white p-1 text-[12.5px]">
-            <Link href={viewHref("list")} className={cn("rounded-full px-3 py-1 font-medium", view === "list" ? "bg-brand-700 text-white" : "text-ink-2 hover:text-brand-700")}>List</Link>
-            <Link href={viewHref("teams")} className={cn("rounded-full px-3 py-1 font-medium", view === "teams" ? "bg-brand-700 text-white" : "text-ink-2 hover:text-brand-700")}>By team</Link>
-          </span>
-        </form>
+        </FilterBar>
         {rows.length === 0 ? (
           <EmptyState icon={Users} title="No one matches these filters" className="m-4" />
         ) : view === "teams" ? (
