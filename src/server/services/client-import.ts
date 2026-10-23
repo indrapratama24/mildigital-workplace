@@ -58,7 +58,7 @@ export function clientCsvTemplate() {
     "consultant@mildigital.id",
     "",
     "",
-    "strategist1@mildigital.id; strategist2@mildigital.id",
+    "strategist1@mildigital.id (Meta Regular); strategist2@mildigital.id (GMV Max TikTok)",
     "https://example.com",
     "https://instagram.com/example",
     "https://tiktok.com/@example",
@@ -118,11 +118,25 @@ export async function importClientsCsv(actor: CurrentUser, text: string, dryRun 
       else if (!e.isActive) err(`${label}: ${e.fullName} is no longer active.`);
       return e?.id ?? null;
     };
+    // ads_strategists: "email (Meta Regular | TTAM); email2" — the bracket lists the ad accounts that person handles.
+    const adAccounts = list(r.ad_accounts);
+    const asAdAccounts: Record<string, string[]> = {};
+    const strategists: string[] = [];
+    for (const entry of list(r.ads_strategists)) {
+      const m = /^(.*?)\s*\((.*)\)\s*$/.exec(entry);
+      const id = person(m ? m[1] : entry, "ads_strategists");
+      if (!id) continue;
+      strategists.push(id);
+      const handled = m ? m[2].split("|").map((x) => x.trim()).filter(Boolean) : [];
+      for (const a of handled) if (!adAccounts.some((x) => x.toLowerCase() === a.toLowerCase())) err(`ads_strategists: “${a}” isn't listed in ad_accounts.`);
+      asAdAccounts[id] = handled;
+    }
     const team: TeamInput = {
       primary: opt(r.consultant_1) ? person(r.consultant_1, "consultant_1") : null,
       secondary: opt(r.consultant_2) ? person(r.consultant_2, "consultant_2") : null,
       additional: list(r.additional_consultants).map((v) => person(v, "additional_consultants")).filter((x): x is string => !!x),
-      adsStrategists: list(r.ads_strategists).map((v) => person(v, "ads_strategists")).filter((x): x is string => !!x),
+      adsStrategists: strategists,
+      asAdAccounts,
     };
     const statusRaw = (r.status ?? "").trim().toUpperCase();
     // Preparation = Active with a Date START in the future (it turns Active on that day).
@@ -154,7 +168,7 @@ export async function importClientsCsv(actor: CurrentUser, text: string, dryRun 
       categoryId: category?.id ?? null,
       industryName: opt(r.industry),
       subIndustryName: opt(r.sub_industry),
-      adAccounts: list(r.ad_accounts),
+      adAccounts,
       description: opt(r.brand_description),
       websiteUrl: opt(r.website_url),
       instagramUrl: opt(r.instagram_url),

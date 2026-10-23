@@ -40,6 +40,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
           secondary: c.consultant2?.id ?? "",
           additional: c.additional.map((p) => p.id),
           adsStrategists: c.adsStrategists.map((p) => p.id),
+          asAdAccounts: Object.fromEntries(c.adsStrategists.map((p) => [p.id, p.adAccounts])),
           waivePrimary: c.primaryConsultantWaived,
           waiverReason: c.waiverReason ?? "",
           categoryId: c.categoryId ?? "",

@@ -1493,6 +1493,8 @@ model ClientTeamAssignment {
   employeeId    String
   employee      Employee    @relation("ClientAssignments", fields: [employeeId], references: [id])
   role          ClientRole
+  /// Ads Strategists only: the client's ad account types (ClientAdAccountType ids) this person handles.
+  adAccountTypeIds String[]  @default([])
   effectiveFrom DateTime    @db.Date
   effectiveTo   DateTime?   @db.Date
   assignedById  String?

@@ -340,3 +340,38 @@ describe("Preparation status", () => {
     vi.setSystemTime(new Date("2026-11-02T03:00:00Z"));
   });
 });
+
+describe("Ads Strategist ad accounts", () => {
+  it("each Ads Strategist handles some of the client's ad accounts; changes are dated", async () => {
+    const m = await manager();
+    const ads = ["Meta Regular", "Meta CPAS Shopee", "GMV Max TikTok"];
+    const team = (asAdAccounts: Record<string, string[]>) => ({ primary: org.ids.principal, secondary: null, additional: [], adsStrategists: [org.ids.junior, org.ids.peer], asAdAccounts });
+    await expectError(createClient(m, input({ adAccounts: ads, team: team({ [org.ids.junior]: ["TTAM"] }) })), "VALIDATION", /TTAM/);
+    const c = await createClient(m, input({ dateStart: "2025-01-01", adAccounts: ads, team: team({ [org.ids.junior]: ["Meta Regular", "Meta CPAS Shopee"], [org.ids.peer]: ["GMV Max TikTok"] }) }));
+    let got = await getClient(m, c.id);
+    // (no sort order set in the test data → alphabetical)
+    expect(got.adsStrategists.map((p) => [p.id, p.adAccounts])).toEqual([[org.ids.junior, ["Meta CPAS Shopee", "Meta Regular"]], [org.ids.peer, ["GMV Max TikTok"]]]);
+
+    // On 20 Nov, move Meta CPAS Shopee to the second AS from 15 Nov: the old period closes, a new one starts.
+    vi.setSystemTime(new Date("2026-11-20T03:00:00Z"));
+    await updateClient(m, c.id, { ...upd(c.clientCode, { dateStart: "2025-01-01", adAccounts: ads, team: team({ [org.ids.junior]: ["Meta Regular"], [org.ids.peer]: ["GMV Max TikTok", "Meta CPAS Shopee"] }) }), teamEffectiveDate: "2026-11-15" });
+    vi.setSystemTime(new Date("2026-11-02T03:00:00Z"));
+    got = await getClient(m, c.id);
+    expect(got.adsStrategists.find((p) => p.id === org.ids.peer)?.adAccounts).toEqual(["GMV Max TikTok", "Meta CPAS Shopee"]);
+    const junior = got.assignmentHistory.filter((a) => a.employee.id === org.ids.junior);
+    expect(junior.map((a) => [a.from, a.to, a.adAccounts])).toEqual([["2026-11-15", null, ["Meta Regular"]], ["2026-11-02", "2026-11-14", ["Meta CPAS Shopee", "Meta Regular"]]]);
+
+    // Updates that don't send ad accounts (e.g. older callers) keep them.
+    await updateClient(m, c.id, upd(c.clientCode, { dateStart: "2025-01-01", adAccounts: ads, team: { primary: org.ids.principal, secondary: null, additional: [], adsStrategists: [org.ids.junior, org.ids.peer] } }));
+    expect((await getClient(m, c.id)).adsStrategists.find((p) => p.id === org.ids.junior)?.adAccounts).toEqual(["Meta Regular"]);
+
+    // CSV: export writes "email (Ad | Ad)"; importing it back changes nothing.
+    const csv = await clientsExportCsv(m, (await listClients(m, {})).rows);
+    expect(csv).toMatch(/\(GMV Max TikTok \| Meta CPAS Shopee\)/);
+    const res = await importClientsCsv(m, csv, false);
+    expect([res.updated, res.failed]).toEqual([1, 0]);
+    expect((await getClient(m, c.id)).adsStrategists.map((p) => p.adAccounts)).toEqual([["Meta Regular"], ["GMV Max TikTok", "Meta CPAS Shopee"]]);
+    const bad = await importClientsCsv(m, csv.replace("(Meta Regular)", "(TTAM)"), true);
+    expect(bad.rows[0].errors.join(" ")).toMatch(/TTAM/);
+  });
+});

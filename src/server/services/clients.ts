@@ -225,18 +225,43 @@ const lockBrand = (tx: Tx, id: string) => tx.$queryRaw`SELECT id FROM "ClientBra
  * Applies the desired team from `from` (the change date): unchanged rows stay, removed/changed rows end the
  * day before, new rows start that day.
  */
+/** Team rows with each Ads Strategist's ad accounts resolved to the client's ad account type ids. */
+async function resolveTeamRows(tx: Tx, brandId: string, team: TeamInput) {
+  const owned = await tx.clientBrandAdAccount.findMany({ where: { brandId }, include: { type: { select: { id: true, name: true } } } });
+  const byName = new Map(owned.map((a) => [a.type.name.toLowerCase(), a.type.id]));
+  return teamRows(team).map((r) => {
+    const ids = [...new Set(r.adAccounts.map((n) => {
+      const id = byName.get(n.trim().toLowerCase());
+      if (!id) throw invalid(`“${n}” isn't one of this client's ad accounts. Add it under Ad accounts handled first.`);
+      return id;
+    }))].sort();
+    return { employeeId: r.employeeId, role: r.role, adAccountTypeIds: ids };
+  });
+}
+
+const sameIds = (a: string[], b: string[]) => a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
+
 async function syncTeam(tx: Tx, actor: CurrentUser, brandId: string, team: TeamInput, from: ISODate) {
-  const wanted = teamRows(team);
+  const wanted = await resolveTeamRows(tx, brandId, team);
   const current = await tx.clientTeamAssignment.findMany({ where: { brandId, effectiveTo: null } });
   const keep = new Set<string>();
-  const changes: { employeeId: string; from: ClientRole | null; to: ClientRole | null }[] = [];
+  const changes: { employeeId: string; from: ClientRole | null; to: ClientRole | null; adAccounts?: string[] }[] = [];
   for (const row of current) {
     const w = wanted.find((x) => x.employeeId === row.employeeId);
+    const started = toISO(row.effectiveFrom);
     if (w && w.role === row.role) {
       keep.add(row.employeeId);
+      // Callers that don't send ad accounts (asAdAccounts omitted) leave them as they are.
+      if (team.asAdAccounts === undefined || sameIds(w.adAccountTypeIds, row.adAccountTypeIds)) continue;
+      // Ad accounts handled changed: correct a row that starts on/after the change date, otherwise start a new period.
+      if (started >= from) await tx.clientTeamAssignment.update({ where: { id: row.id }, data: { adAccountTypeIds: w.adAccountTypeIds } });
+      else {
+        await tx.clientTeamAssignment.update({ where: { id: row.id }, data: { effectiveTo: fromISO(addDays(from, -1)), endedById: actor.employeeId } });
+        await tx.clientTeamAssignment.create({ data: { brandId, employeeId: w.employeeId, role: w.role, adAccountTypeIds: w.adAccountTypeIds, effectiveFrom: fromISO(from), assignedById: actor.employeeId } });
+      }
+      changes.push({ employeeId: row.employeeId, from: row.role, to: w.role, adAccounts: w.adAccountTypeIds });
       continue;
     }
-    const started = toISO(row.effectiveFrom);
     await tx.clientTeamAssignment.update({ where: { id: row.id }, data: { effectiveTo: fromISO(started >= from ? started : addDays(from, -1)), endedById: actor.employeeId } });
     if (!w) changes.push({ employeeId: row.employeeId, from: row.role, to: null });
   }
@@ -245,7 +270,7 @@ async function syncTeam(tx: Tx, actor: CurrentUser, brandId: string, team: TeamI
   for (const w of wanted) {
     if (keep.has(w.employeeId)) continue;
     const prev = current.find((c) => c.employeeId === w.employeeId);
-    await tx.clientTeamAssignment.create({ data: { brandId, employeeId: w.employeeId, role: w.role, effectiveFrom: fromISO(from), assignedById: actor.employeeId } });
+    await tx.clientTeamAssignment.create({ data: { brandId, employeeId: w.employeeId, role: w.role, adAccountTypeIds: w.adAccountTypeIds, effectiveFrom: fromISO(from), assignedById: actor.employeeId } });
     changes.push({ employeeId: w.employeeId, from: prev?.role ?? null, to: w.role });
   }
   return changes;
@@ -313,9 +338,10 @@ export async function createClient(actor: CurrentUser, input: CreateClientInput)
     });
     await syncAdAccounts(tx, brand.id, input.adAccounts ?? []);
     const assignFrom = input.dateStart > today ? input.dateStart : today;
-    await assertEmployees(tx, teamRows(input.team).map((r) => r.employeeId));
-    for (const r of teamRows(input.team))
-      await tx.clientTeamAssignment.create({ data: { brandId: brand.id, employeeId: r.employeeId, role: r.role, effectiveFrom: fromISO(assignFrom), assignedById: actor.employeeId } });
+    const rows = await resolveTeamRows(tx, brand.id, input.team);
+    await assertEmployees(tx, rows.map((r) => r.employeeId));
+    for (const r of rows)
+      await tx.clientTeamAssignment.create({ data: { brandId: brand.id, employeeId: r.employeeId, role: r.role, adAccountTypeIds: r.adAccountTypeIds, effectiveFrom: fromISO(assignFrom), assignedById: actor.employeeId } });
     await audit(tx, { actorUserId: actor.userId, action: "client.create", entityType: "ClientBrand", entityId: brand.id, after: { ...brand, packageId: input.packageId, team: input.team } });
     return brand;
   });
@@ -527,7 +553,19 @@ type BrandWithTeam = Prisma.ClientBrandGetPayload<{ include: typeof teamInclude 
 const periods = (b: BrandWithTeam): StatusPeriod[] => b.statusHistory.map((h) => ({ status: h.status, from: toISO(h.effectiveFrom), to: h.effectiveTo ? toISO(h.effectiveTo) : null }));
 
 function shape(b: BrandWithTeam, today: ISODate) {
-  const people = (role: ClientRole) => b.assignments.filter((a) => a.role === role).map((a) => ({ id: a.employee.id, name: a.employee.fullName, title: a.employee.jobTitle, isActive: a.employee.isActive, photoId: a.employee.photoId }));
+  const types = b.adAccounts.map((a) => a.type).sort((x, y) => x.sortOrder - y.sortOrder || x.name.localeCompare(y.name));
+  const people = (role: ClientRole) =>
+    b.assignments
+      .filter((a) => a.role === role)
+      .map((a) => ({
+        id: a.employee.id,
+        name: a.employee.fullName,
+        title: a.employee.jobTitle,
+        isActive: a.employee.isActive,
+        photoId: a.employee.photoId,
+        /** Ads Strategists: the client's ad accounts this person handles (in display order). */
+        adAccounts: types.filter((t) => a.adAccountTypeIds.includes(t.id)).map((t) => t.name),
+      }));
   const pkg = b.engagements[0]?.packages[0]?.package ?? null;
   const dateStart = toISO(b.dateStart);
   const dateOff = b.dateOff ? toISO(b.dateOff) : null;
@@ -546,7 +584,7 @@ function shape(b: BrandWithTeam, today: ISODate) {
     industry: b.industry?.name ?? null,
     industryId: b.industry?.id ?? null,
     subIndustry: b.subIndustry?.name ?? null,
-    adAccounts: b.adAccounts.map((a) => a.type).sort((x, y) => x.sortOrder - y.sortOrder || x.name.localeCompare(y.name)).map((t) => t.name),
+    adAccounts: types.map((t) => t.name),
     package: pkg ? { id: pkg.id, name: pkg.name, isActive: pkg.isActive } : null,
     consultant1: people("CONSULTANT_PRIMARY")[0] ?? null,
     consultant2: people("CONSULTANT_SECONDARY")[0] ?? null,
@@ -642,9 +680,10 @@ export async function getClient(viewer: CurrentUser, id: string) {
   });
   if (!b || b.archivedAt) throw notFound("Client");
   const sensitive = await canSeeClientSensitive(viewer, id);
-  const [engagements, assignmentHistory] = await Promise.all([
+  const [engagements, assignmentHistory, adTypes] = await Promise.all([
     db.clientEngagement.findMany({ where: { brandId: id }, orderBy: { startDate: "asc" }, include: { packages: { orderBy: { effectiveFrom: "asc" }, include: { package: true } } } }),
     db.clientTeamAssignment.findMany({ where: { brandId: id }, orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }], include: { employee: { select: { id: true, fullName: true, email: true, employeeCode: true } } } }),
+    db.clientAdAccountType.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true } }),
   ]);
   return {
     ...shape(b as unknown as BrandWithTeam, today),
@@ -676,7 +715,14 @@ export async function getClient(viewer: CurrentUser, id: string) {
       end: e.endDate ? toISO(e.endDate) : null,
       packages: e.packages.map((p) => ({ id: p.id, name: p.package.name, from: toISO(p.effectiveFrom), to: p.effectiveTo ? toISO(p.effectiveTo) : null })),
     })),
-    assignmentHistory: assignmentHistory.map((a) => ({ id: a.id, employee: a.employee, role: a.role, from: toISO(a.effectiveFrom), to: a.effectiveTo ? toISO(a.effectiveTo) : null })),
+    assignmentHistory: assignmentHistory.map((a) => ({
+      id: a.id,
+      employee: a.employee,
+      role: a.role,
+      adAccounts: adTypes.filter((t) => a.adAccountTypeIds.includes(t.id)).map((t) => t.name),
+      from: toISO(a.effectiveFrom),
+      to: a.effectiveTo ? toISO(a.effectiveTo) : null,
+    })),
   };
 }
 export type ClientDetail = Awaited<ReturnType<typeof getClient>>;
@@ -758,7 +804,8 @@ export async function clientsExportCsv(viewer: CurrentUser, rows: ClientRow[]) {
       consultant_1: r.consultant1 && email.get(r.consultant1.id),
       consultant_2: r.consultant2 && email.get(r.consultant2.id),
       additional_consultants: r.additional.map((p) => email.get(p.id)).join("; "),
-      ads_strategists: r.adsStrategists.map((p) => email.get(p.id)).join("; "),
+      // "email (Ad account | Ad account)" per Ads Strategist; the brackets are left out when none are set.
+      ads_strategists: r.adsStrategists.map((p) => `${email.get(p.id)}${p.adAccounts.length ? ` (${p.adAccounts.join(" | ")})` : ""}`).join("; "),
       website_url: x.websiteUrl,
       instagram_url: x.instagramUrl,
       tiktok_url: x.tiktokUrl,

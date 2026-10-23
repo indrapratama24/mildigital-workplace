@@ -62,7 +62,10 @@ export function ClientForm({
     setNewAd("");
   };
   const dirty = JSON.stringify(f) !== JSON.stringify(initial);
-  const teamOf = (v: ClientFormValues) => JSON.stringify([v.primary, v.secondary, [...v.additional].filter(Boolean).sort(), [...v.adsStrategists].sort()]);
+  // Each Ads Strategist's ad accounts, limited to the ones this client still has.
+  const handledBy = (v: ClientFormValues, id: string) => (v.asAdAccounts[id] ?? []).filter((a) => v.adAccounts.some((x) => x.toLowerCase() === a.toLowerCase()));
+  const teamOf = (v: ClientFormValues) =>
+    JSON.stringify([v.primary, v.secondary, [...v.additional].filter(Boolean).sort(), [...v.adsStrategists].sort().map((id) => [id, [...handledBy(v, id)].sort()])]);
   const teamChanged = mode === "edit" && teamOf(f) !== teamOf(initial);
   const statusChanged = mode === "edit" && f.status !== initial.status;
   const preparing = f.status === "ACTIVE" && !!f.dateStart && f.dateStart > today;
@@ -75,7 +78,19 @@ export function ClientForm({
     return () => window.removeEventListener("beforeunload", h);
   }, [dirty]);
 
-  const team = { primary: f.primary || null, secondary: f.secondary || null, additional: f.additional.filter(Boolean), adsStrategists: f.adsStrategists };
+  const team = {
+    primary: f.primary || null,
+    secondary: f.secondary || null,
+    additional: f.additional.filter(Boolean),
+    adsStrategists: f.adsStrategists,
+    asAdAccounts: Object.fromEntries(f.adsStrategists.map((id) => [id, handledBy(f, id)])),
+  };
+  const unassignedAds = f.adsStrategists.length ? f.adAccounts.filter((a) => !f.adsStrategists.some((id) => handledBy(f, id).some((x) => x.toLowerCase() === a.toLowerCase()))) : [];
+  const toggleHandled = (id: string, name: string) => {
+    const cur = handledBy(f, id);
+    const on = cur.some((x) => x.toLowerCase() === name.toLowerCase());
+    set("asAdAccounts", { ...f.asAdAccounts, [id]: on ? cur.filter((x) => x.toLowerCase() !== name.toLowerCase()) : [...cur, name] });
+  };
   const teamErrors = validateTeam(team, { status: f.status, requirePrimary, waived: f.waivePrimary });
   const errors: string[] = [];
   if (f.name.trim().length < 2) errors.push("Brand name is required.");
@@ -300,22 +315,65 @@ export function ClientForm({
               </Button>
             </div>
           </Field>
-          <Field label={`Ads Strategists (${f.adsStrategists.length}/${MAX_ADS_STRATEGISTS})`} className="sm:col-span-2">
-            <div className="flex flex-wrap items-center gap-2">
-              {f.adsStrategists.map((id) => (
-                <Badge key={id} tone="brand" className="gap-1 py-1 pl-2.5 pr-1">
-                  {people.find((p) => p.id === id)?.fullName ?? "Unknown"}
-                  <button type="button" onClick={() => set("adsStrategists", f.adsStrategists.filter((x) => x !== id))} className="rounded-full p-0.5 hover:bg-brand-100" aria-label="Remove Ads Strategist">
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ))}
+          <Field
+            label={`Ads Strategists (${f.adsStrategists.length}/${MAX_ADS_STRATEGISTS})`}
+            hint={f.adsStrategists.length ? "Tick the ad accounts each Ads Strategist handles." : undefined}
+            className="sm:col-span-2"
+          >
+            <div className="space-y-2">
+              {f.adsStrategists.map((id) => {
+                const p = people.find((x) => x.id === id);
+                const mine = handledBy(f, id);
+                return (
+                  <div key={id} className="rounded-xl border border-line p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-[13.5px] font-medium text-ink">{p?.fullName ?? "Unknown"}</div>
+                        {p?.jobTitle && <div className="truncate text-[12px] text-muted">{p.jobTitle}</div>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const { [id]: _, ...rest } = f.asAdAccounts;
+                          setF((v) => ({ ...v, adsStrategists: v.adsStrategists.filter((x) => x !== id), asAdAccounts: rest }));
+                        }}
+                        className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-canvas hover:text-danger"
+                        aria-label={`Remove ${p?.fullName ?? "Ads Strategist"}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={`Ad accounts handled by ${p?.fullName ?? "this person"}`}>
+                      {f.adAccounts.length === 0 && <span className="text-[12px] text-subtle">Choose the client's ad accounts above first.</span>}
+                      {f.adAccounts.map((name) => {
+                        const on = mine.some((x) => x.toLowerCase() === name.toLowerCase());
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => toggleHandled(id, name)}
+                            className={
+                              on
+                                ? "inline-flex items-center gap-1 rounded-full border border-brand-300 bg-brand-50 px-2.5 py-1 text-[12.5px] font-medium text-brand-700"
+                                : "inline-flex items-center gap-1 rounded-full border border-line bg-white px-2.5 py-1 text-[12.5px] text-ink-2 hover:border-brand-200"
+                            }
+                          >
+                            {on && <Check className="h-3 w-3" />} {name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
               {f.adsStrategists.length < MAX_ADS_STRATEGISTS && (
                 <Select value="" onChange={(e) => e.target.value && set("adsStrategists", [...f.adsStrategists, e.target.value])} className="h-9 w-auto min-w-[220px]" aria-label="Add Ads Strategist">
                   <option value="">+ Add Ads Strategist…</option>
                   {options("").map((p) => <option key={p.id} value={p.id}>{p.fullName} — {p.jobTitle}</option>)}
                 </Select>
               )}
+              {unassignedAds.length > 0 && <p className="text-[12px] text-warning">Not handled by anyone yet: {unassignedAds.join(", ")}</p>}
             </div>
           </Field>
           {teamChanged && (

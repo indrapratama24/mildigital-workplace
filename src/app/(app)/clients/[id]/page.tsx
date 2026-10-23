@@ -136,7 +136,10 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   {c.assignmentHistory.map((a) => (
                     <tr key={a.id} className={a.to ? "text-muted" : ""}>
                       <td><Link href={`/directory/${a.employee.id}`} className="hover:text-brand-700">{a.employee.fullName}</Link></td>
-                      <td>{CLIENT_ROLE_LABEL[a.role]}</td>
+                      <td>
+                        {CLIENT_ROLE_LABEL[a.role]}
+                        {a.adAccounts.length > 0 && <div className="text-[11.5px] text-muted">{a.adAccounts.join(", ")}</div>}
+                      </td>
                       <td>{formatDate(a.from)}</td>
                       <td>{a.to ? formatDate(a.to) : <Badge tone="success">Current</Badge>}</td>
                     </tr>
@@ -156,9 +159,37 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               {c.primaryConsultantWaived && <Notice tone="warning">Exception: active without Consultant{c.waiverReason ? ` — ${c.waiverReason}` : ""}.</Notice>}
               <TeamLine label="Consultant 2" people={c.consultant2 ? [c.consultant2] : []} />
               <TeamLine label="Additional consultants" people={c.additional} />
-              <TeamLine label={`Ads Strategists (${c.adsStrategists.length}/3)`} people={c.adsStrategists} />
+              <TeamLine label={`Ads Strategists (${c.adsStrategists.length}/3)`} people={c.adsStrategists} showAdAccounts />
             </CardBody>
           </Card>
+
+          {c.adAccounts.length > 0 && (
+            <Card>
+              <CardHeader title="Ad account coverage" description="Which Ads Strategist handles each ad account." />
+              <CardBody className="space-y-2.5">
+                {c.adAccounts.map((name) => {
+                  const handlers = c.adsStrategists.filter((p) => p.adAccounts.includes(name));
+                  return (
+                    <div key={name} className="flex items-start justify-between gap-3 text-[13px]">
+                      <span className="min-w-0 truncate font-medium text-ink">{name}</span>
+                      {handlers.length ? (
+                        <span className="min-w-0 text-right text-ink-2">
+                          {handlers.map((p, i) => (
+                            <span key={p.id}>
+                              {i > 0 && ", "}
+                              <Link href={`/directory/${p.id}`} className="hover:text-brand-700">{p.name}</Link>
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        <Badge tone="warning">Unassigned</Badge>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardBody>
+            </Card>
+          )}
 
           <Card>
             <CardHeader title="Client contact & notes" />
@@ -208,7 +239,15 @@ function KV({ k, v }: { k: string; v: React.ReactNode }) {
   );
 }
 
-function TeamLine({ label, people }: { label: string; people: { id: string; name: string; title: string; isActive: boolean; photoId: string | null }[] }) {
+function TeamLine({
+  label,
+  people,
+  showAdAccounts,
+}: {
+  label: string;
+  people: { id: string; name: string; title: string; isActive: boolean; photoId: string | null; adAccounts: string[] }[];
+  showAdAccounts?: boolean;
+}) {
   return (
     <div>
       <div className="mb-1 text-[11.5px] font-medium text-muted">{label}</div>
@@ -222,6 +261,17 @@ function TeamLine({ label, people }: { label: string; people: { id: string; name
               <span className="min-w-0">
                 <span className="block truncate text-[13px] font-medium text-ink">{p.name}{!p.isActive && <span className="ml-1 text-[11px] text-danger">(left)</span>}</span>
                 <span className="block truncate text-[11.5px] text-muted">{p.title}</span>
+                {showAdAccounts && (
+                  <span className="mt-1 flex flex-wrap gap-1">
+                    {p.adAccounts.length ? (
+                      p.adAccounts.map((a) => (
+                        <span key={a} className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">{a}</span>
+                      ))
+                    ) : (
+                      <span className="text-[11px] text-subtle">No ad account set</span>
+                    )}
+                  </span>
+                )}
               </span>
             </Link>
           ))}

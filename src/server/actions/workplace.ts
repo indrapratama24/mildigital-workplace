@@ -34,6 +34,7 @@ const team = z.object({
   secondary: z.string().nullable(),
   additional: z.array(z.string()).max(20),
   adsStrategists: z.array(z.string()).max(10),
+  asAdAccounts: z.record(z.string(), z.array(z.string().max(60)).max(20)).optional(),
 });
 const info = {
   name: z.string().max(120),

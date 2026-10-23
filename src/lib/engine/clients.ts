@@ -100,6 +100,8 @@ export interface TeamInput {
   secondary: string | null;
   additional: string[];
   adsStrategists: string[];
+  /** Ad accounts (by name) each Ads Strategist handles, keyed by employee id. Must be among the client's ad accounts. */
+  asAdAccounts?: Record<string, string[]>;
 }
 
 export function validateTeam(t: TeamInput, opts: { status: ClientStatusT; requirePrimary: boolean; waived: boolean }) {
@@ -113,12 +115,12 @@ export function validateTeam(t: TeamInput, opts: { status: ClientStatusT; requir
 }
 
 /** Flattens the form's team into role rows. */
-export function teamRows(t: TeamInput): { employeeId: string; role: ClientRoleT }[] {
+export function teamRows(t: TeamInput): { employeeId: string; role: ClientRoleT; adAccounts: string[] }[] {
   return [
-    ...(t.primary ? [{ employeeId: t.primary, role: "CONSULTANT_PRIMARY" as const }] : []),
-    ...(t.secondary ? [{ employeeId: t.secondary, role: "CONSULTANT_SECONDARY" as const }] : []),
-    ...t.additional.map((employeeId) => ({ employeeId, role: "CONSULTANT_ADDITIONAL" as const })),
-    ...t.adsStrategists.map((employeeId) => ({ employeeId, role: "ADS_STRATEGIST" as const })),
+    ...(t.primary ? [{ employeeId: t.primary, role: "CONSULTANT_PRIMARY" as const, adAccounts: [] }] : []),
+    ...(t.secondary ? [{ employeeId: t.secondary, role: "CONSULTANT_SECONDARY" as const, adAccounts: [] }] : []),
+    ...t.additional.map((employeeId) => ({ employeeId, role: "CONSULTANT_ADDITIONAL" as const, adAccounts: [] })),
+    ...t.adsStrategists.map((employeeId) => ({ employeeId, role: "ADS_STRATEGIST" as const, adAccounts: t.asAdAccounts?.[employeeId] ?? [] })),
   ];
 }
 

@@ -13,6 +13,8 @@ export interface ClientFormValues {
   secondary: string;
   additional: string[];
   adsStrategists: string[];
+  /** Ad accounts (names) each Ads Strategist handles, keyed by employee id. */
+  asAdAccounts: Record<string, string[]>;
   waivePrimary: boolean;
   waiverReason: string;
   categoryId: string;
@@ -41,6 +43,7 @@ export const EMPTY_CLIENT: ClientFormValues = {
   secondary: "",
   additional: [],
   adsStrategists: [],
+  asAdAccounts: {},
   waivePrimary: false,
   waiverReason: "",
   categoryId: "",
