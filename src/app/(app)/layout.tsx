@@ -48,9 +48,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="flex min-w-0 items-center gap-2">
             <MobileNav {...nav} />
             <SidebarToggle />
-            <Link href="/" className="lg:hidden" aria-label="Home">
-              <Wordmark id="top" compact />
-            </Link>
           </div>
           <div className="flex shrink-0 items-center gap-2.5">
             <NotificationBell
