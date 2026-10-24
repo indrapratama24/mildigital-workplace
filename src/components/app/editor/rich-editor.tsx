@@ -11,6 +11,7 @@ import {
   AlignLeft,
   AlignRight,
   AtSign,
+  BookOpen,
   Bold,
   CalendarDays,
   Check,
@@ -20,6 +21,7 @@ import {
   Columns2,
   Columns3,
   FileCode2,
+  FileDown,
   Heading1,
   Heading2,
   Heading3,
@@ -49,9 +51,10 @@ import {
 import { uploadContentFileAction } from "@/server/actions/workplace";
 import { contentExtensions, CALLOUT_TONES, type CalloutTone } from "@/lib/content/extensions";
 import { EMBED_PROVIDERS, isDocJson, isSafeHref, markdownToHtml, toEmbed } from "@/lib/content/format";
+import { looksLikeMarkdown, markdownToDoc } from "@/lib/content/markdown";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/field";
+import { Field, Input, Textarea } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
 
 type Person = { id: string; name: string };
@@ -76,13 +79,27 @@ export function RichEditor({
   minHeight?: number;
 }) {
   const initial = useMemo(() => (isDocJson(value) ? JSON.parse(value) : value.trim() ? markdownToHtml(value) : ""), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const editorRef = useRef<Editor | null>(null);
+  const peopleRef = useRef(people);
+  peopleRef.current = people;
   const editor = useEditor({
     extensions: [...contentExtensions(), Placeholder.configure({ placeholder })],
     content: initial,
     immediatelyRender: false,
-    editorProps: { attributes: { class: "rich-content rich-editor focus:outline-none", style: `min-height:${minHeight}px` } },
+    editorProps: {
+      attributes: { class: "rich-content rich-editor focus:outline-none", style: `min-height:${minHeight}px` },
+      // Text written in WORKPLACE Markdown (see /help/writing) is pasted fully formatted; ⌘Z keeps it as plain text.
+      handlePaste: (view, event) => {
+        const text = event.clipboardData?.getData("text/plain") ?? "";
+        const hasHtml = !!event.clipboardData?.getData("text/html");
+        if (!text.trim() || view.state.selection.$from.parent.type.name === "codeBlock" || !looksLikeMarkdown(text, hasHtml) || !editorRef.current) return false;
+        editorRef.current.chain().focus().insertContent(markdownToDoc(text, peopleRef.current).content ?? []).run();
+        return true;
+      },
+    },
     onUpdate: ({ editor }) => onChange(JSON.stringify(editor.getJSON())),
   });
+  editorRef.current = editor;
   // Normalise legacy Markdown into JSON once so saving without edits keeps the same content.
   useEffect(() => {
     if (editor && !isDocJson(value) && value.trim()) onChange(JSON.stringify(editor.getJSON()));
@@ -144,7 +161,7 @@ function Toolbar({ editor, people }: { editor: Editor; people: Person[] }) {
       editor.off("transaction", f);
     };
   }, [editor]);
-  const [dialog, setDialog] = useState<null | "link" | "embed" | "date" | "mention" | "imageUrl">(null);
+  const [dialog, setDialog] = useState<null | "link" | "embed" | "date" | "mention" | "imageUrl" | "markdown">(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
   const [uploading, startUpload] = useTransition();
@@ -180,6 +197,10 @@ function Toolbar({ editor, people }: { editor: Editor; people: Person[] }) {
     [
       { label: "Date", icon: CalendarDays, run: () => setDialog("date") },
       { label: "Mention a colleague", icon: AtSign, run: () => setDialog("mention") },
+    ],
+    [
+      { label: "Paste formatted text", icon: FileDown, run: () => setDialog("markdown"), hint: "WORKPLACE Markdown" },
+      { label: "Writing guide", icon: BookOpen, run: () => window.open("/help/writing", "_blank", "noopener") },
     ],
   ];
 
@@ -260,6 +281,7 @@ function Toolbar({ editor, people }: { editor: Editor; people: Person[] }) {
       <ImageUrlDialog open={dialog === "imageUrl"} onClose={() => setDialog(null)} editor={editor} />
       <DateDialog open={dialog === "date"} onClose={() => setDialog(null)} editor={editor} />
       <MentionDialog open={dialog === "mention"} onClose={() => setDialog(null)} editor={editor} people={people} />
+      <MarkdownDialog open={dialog === "markdown"} onClose={() => setDialog(null)} editor={editor} people={people} />
     </div>
   );
 }
@@ -516,6 +538,37 @@ function MentionDialog({ open, onClose, editor, people }: { open: boolean; onClo
         ))}
         {!list.length && <p className="px-3 py-2 text-[13px] text-muted">{people.length ? "No match." : "No people available."}</p>}
       </div>
+    </Dialog>
+  );
+}
+
+function MarkdownDialog({ open, onClose, editor, people }: { open: boolean; onClose: () => void; editor: Editor; people: Person[] }) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (open) setText("");
+  }, [open]);
+  const insert = () => {
+    editor.chain().focus().insertContent(markdownToDoc(text, people).content ?? []).run();
+    onClose();
+  };
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
+      title="Paste formatted text"
+      description="Paste a page written in WORKPLACE Markdown — headings, callouts, tables, columns, videos and more come in formatted."
+      className="sm:max-w-2xl"
+      footer={
+        <>
+          <a href="/help/writing" target="_blank" rel="noopener" className="mr-auto inline-flex items-center gap-1.5 text-[13px] font-medium text-brand-700 hover:underline">
+            <BookOpen className="h-4 w-4" /> Writing guide
+          </a>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button disabled={!text.trim()} onClick={insert}>Insert</Button>
+        </>
+      }
+    >
+      <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={14} className="font-mono text-[12.5px]" placeholder={"## Section title\n\n> [!INFO] Good to know\n> Text inside the callout.\n\n- Point one\n- Point two"} autoFocus />
     </Dialog>
   );
 }
