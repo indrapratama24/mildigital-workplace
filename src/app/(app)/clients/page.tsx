@@ -170,8 +170,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
               <thead>
                 <tr>
                   <BulkHeaderCell ids={list.rows.map((r) => r.id)} />
-                  <th>Client ID</th>
-                  <th>Brand name</th>
+                  <th className="freeze-col">Brand name</th>
                   <th>Status</th>
                   <th>Package</th>
                   <th>Date START</th>
@@ -186,10 +185,12 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                 {list.rows.map((r) => (
                   <tr key={r.id} className="hover:bg-canvas/50">
                     <BulkCell id={r.id} label={r.name} />
-                    <td className="font-mono text-[12.5px] text-ink-2">{r.clientCode}</td>
-                    <td>
-                      <Link href={`/clients/${r.id}`} className="font-medium text-ink hover:text-brand-700">{r.name}</Link>
-                      {(r.industry || r.category) && <div className="text-[11.5px] text-muted">{[r.category, r.industry, r.subIndustry].filter(Boolean).join(" · ")}</div>}
+                    <td className="freeze-col max-w-[260px]">
+                      <Link href={`/clients/${r.id}`} className="block truncate font-medium text-ink hover:text-brand-700">{r.name}</Link>
+                      <div className="truncate text-[11.5px] text-muted">
+                        <span className="font-mono text-ink-2">{r.clientCode}</span>
+                        {(r.industry || r.category) && <> · {[r.category, r.industry, r.subIndustry].filter(Boolean).join(" · ")}</>}
+                      </div>
                     </td>
                     <td>
                       <Badge tone={STATUS_TONE[r.displayStatus]} dot>{CLIENT_STATUS_LABEL[r.displayStatus]}</Badge>

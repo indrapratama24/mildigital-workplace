@@ -10,6 +10,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/misc";
 import { WEEKDAY_SHORT } from "@/lib/dates";
 import { cn } from "@/lib/cn";
+import type { LevelException, Requirement } from "@/lib/engine/request-rules";
 
 type Result = { ok: boolean; error?: string; message?: string; data?: unknown };
 function useRun() {
@@ -351,10 +352,93 @@ export interface RequestTypeDTO {
   annualRules: boolean;
   isSensitive: boolean;
   isActive: boolean;
+  levelExceptions: LevelException[];
 }
 
-export function RequestTypeDialog({ initial }: { initial?: RequestTypeDTO }) {
-  const blank: RequestTypeDTO = { code: "", name: "", category: "PERMISSION", description: "", documentRequirement: "NONE", delegation: "OPTIONAL", reasonMinLength: 10, advanceNoticeDays: 0, allowHalfDay: true, allowHourly: false, deductsBalance: false, defaultEntitlement: null, monthlyAccrual: false, eligibleStatuses: [], annualRules: false, isSensitive: false, isActive: true };
+const REQ_LABEL: Record<Requirement, string> = { NONE: "Not requested", OPTIONAL: "Optional", REQUIRED: "Required" };
+const DELEG_LABEL: Record<Requirement, string> = { NONE: "Not used", OPTIONAL: "Optional", REQUIRED: "Required" };
+
+/** Rules that differ for some levels (e.g. leaders). Empty fields keep the type's own rule. */
+function LevelExceptions({ f, levels, onChange }: { f: RequestTypeDTO; levels: { id: string; name: string }[]; onChange: (v: LevelException[]) => void }) {
+  const list = f.levelExceptions;
+  const update = (i: number, patch: Partial<LevelException>) => onChange(list.map((e, k) => (k === i ? { ...e, ...patch } : e)));
+  const num = (v: string) => (v === "" ? null : Number(v));
+  const bool = (v: string) => (v === "" ? null : v === "yes");
+  const usedElsewhere = (i: number) => new Set(list.flatMap((e, k) => (k === i ? [] : e.levelIds)));
+  return (
+    <div className="sm:col-span-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div>
+          <div className="text-[13px] font-medium text-ink-2">Exceptions by level</div>
+          <p className="text-[12px] text-muted">Different rules for some levels, e.g. leaders. Leave a field empty to keep the rule above.</p>
+        </div>
+        <Button size="sm" variant="secondary" disabled={list.length >= 10} onClick={() => onChange([...list, { name: "", levelIds: [] }])}>
+          <Plus className="h-3.5 w-3.5" /> Add exception
+        </Button>
+      </div>
+      <div className="space-y-3">
+        {list.map((e, i) => {
+          const taken = usedElsewhere(i);
+          return (
+            <div key={i} className="rounded-xl border border-line bg-canvas/60 p-3">
+              <div className="flex items-end gap-2">
+                <Field label="Exception name" className="flex-1"><Input value={e.name} placeholder="e.g. Leaders" onChange={(ev) => update(i, { name: ev.target.value })} /></Field>
+                <Button size="sm" variant="ghost" aria-label={`Remove ${e.name || "exception"}`} onClick={() => onChange(list.filter((_, k) => k !== i))}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+              <div className="mt-2.5">
+                <div className="mb-1 text-[12.5px] font-medium text-ink-2">Applies to levels</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {levels.map((l) => {
+                    const on = e.levelIds.includes(l.id);
+                    const off = !on && taken.has(l.id);
+                    return (
+                      <button key={l.id} type="button" disabled={off} title={off ? "Already in another exception" : undefined} onClick={() => update(i, { levelIds: on ? e.levelIds.filter((x) => x !== l.id) : [...e.levelIds, l.id] })} className={cn("rounded-full border px-3 py-1 text-[12.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40", on ? "border-brand-700 bg-brand-700 text-white" : "border-line bg-white text-ink-2 hover:border-brand-300")}>
+                        {l.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mt-2.5 grid gap-2.5 sm:grid-cols-2">
+                <Field label="Advance notice (days)"><Input type="number" min={0} value={e.advanceNoticeDays ?? ""} placeholder={`Same (${f.advanceNoticeDays})`} onChange={(ev) => update(i, { advanceNoticeDays: num(ev.target.value) })} /></Field>
+                <Field label="Minimum reason length"><Input type="number" min={0} value={e.reasonMinLength ?? ""} placeholder={`Same (${f.reasonMinLength})`} onChange={(ev) => update(i, { reasonMinLength: num(ev.target.value) })} /></Field>
+                <Field label="Supporting document">
+                  <Select value={e.documentRequirement ?? ""} onChange={(ev) => update(i, { documentRequirement: (ev.target.value || null) as Requirement | null })}>
+                    <option value="">Same ({REQ_LABEL[f.documentRequirement].toLowerCase()})</option>
+                    {(Object.keys(REQ_LABEL) as Requirement[]).map((r) => <option key={r} value={r}>{REQ_LABEL[r]}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Peer delegation">
+                  <Select value={e.delegation ?? ""} onChange={(ev) => update(i, { delegation: (ev.target.value || null) as Requirement | null })}>
+                    <option value="">Same ({DELEG_LABEL[f.delegation].toLowerCase()})</option>
+                    {(Object.keys(DELEG_LABEL) as Requirement[]).map((r) => <option key={r} value={r}>{DELEG_LABEL[r]}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Half days">
+                  <Select value={e.allowHalfDay == null ? "" : e.allowHalfDay ? "yes" : "no"} onChange={(ev) => update(i, { allowHalfDay: bool(ev.target.value) })}>
+                    <option value="">Same ({f.allowHalfDay ? "allowed" : "not allowed"})</option><option value="yes">Allowed</option><option value="no">Not allowed</option>
+                  </Select>
+                </Field>
+                <Field label="Hourly">
+                  <Select value={e.allowHourly == null ? "" : e.allowHourly ? "yes" : "no"} onChange={(ev) => update(i, { allowHourly: bool(ev.target.value) })}>
+                    <option value="">Same ({f.allowHourly ? "allowed" : "not allowed"})</option><option value="yes">Allowed</option><option value="no">Not allowed</option>
+                  </Select>
+                </Field>
+                {f.deductsBalance && (
+                  <Field label="Yearly entitlement (days)"><Input type="number" min={0} value={e.defaultEntitlement ?? ""} placeholder={`Same (${f.defaultEntitlement ?? 0})`} onChange={(ev) => update(i, { defaultEntitlement: num(ev.target.value) })} /></Field>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {!list.length && <p className="rounded-xl border border-dashed border-line px-3 py-2.5 text-[12.5px] text-muted">No exceptions — everyone follows the rules above.</p>}
+      </div>
+    </div>
+  );
+}
+
+export function RequestTypeDialog({ initial, levels }: { initial?: RequestTypeDTO; levels: { id: string; name: string }[] }) {
+  const blank: RequestTypeDTO = { code: "", name: "", category: "PERMISSION", description: "", documentRequirement: "NONE", delegation: "OPTIONAL", reasonMinLength: 10, advanceNoticeDays: 0, allowHalfDay: true, allowHourly: false, deductsBalance: false, defaultEntitlement: null, monthlyAccrual: false, eligibleStatuses: [], annualRules: false, isSensitive: false, isActive: true, levelExceptions: [] };
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<RequestTypeDTO>(initial ?? blank);
   const { pending, run } = useRun();
@@ -404,6 +488,7 @@ export function RequestTypeDialog({ initial }: { initial?: RequestTypeDTO }) {
           )}
           <Checkbox checked={f.isSensitive} onChange={(e) => set("isSensitive", e.target.checked)} label="Sensitive (medical/private)" description="Documents visible only to approvers and HR." />
           <Checkbox checked={f.isActive} onChange={(e) => set("isActive", e.target.checked)} label="Active" />
+          <LevelExceptions f={f} levels={levels} onChange={(v) => set("levelExceptions", v)} />
         </div>
       </Dialog>
     </>

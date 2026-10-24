@@ -2,6 +2,7 @@
 // (Layer 1: delegate accepts coverage; Layer 2: leader approves entitlement).
 import { accruedEntitlement, checkTiers, concurrencyCap, offStretch, unpaidDays } from "@/lib/engine/leave";
 import { isHolidayEffective } from "@/lib/engine/working-days";
+import { rulesForLevel } from "@/lib/engine/request-rules";
 import type { ApprovalStep, ApprovalWorkflow, DurationType, Prisma, Request, RequestStatus } from "@prisma/client";
 import { db, withTx, type DbOrTx, type Tx } from "../db";
 import { addDays as addDaysISO, addMonths, eachDate, formatDate, formatDateRange, fromISO, isoWeekday as isoWeekdayOf, isValidISO, monthEnd, monthStart, todayJakarta, toISO, type ISODate } from "@/lib/dates";
@@ -12,7 +13,7 @@ import { badState, conflict, forbidden, invalid, notFound } from "../errors";
 import { audit } from "./audit";
 import { countRequestDays, getHolidays, loadMonthContext, portionOf, type RequestWithType } from "./calendar";
 import { notify } from "./notifications";
-import { isLeaderOf, resolveApprover } from "./org";
+import { effectiveOn, isLeaderOf, resolveApprover } from "./org";
 import { getSettings } from "./settings";
 import { cancelWorkflow, startWorkflow, type Outcome, type StepSpec } from "./workflow";
 
@@ -76,15 +77,27 @@ export async function findConflicts(tx: DbOrTx, employeeId: string, input: Pick<
  * when checking a request). Monthly-accrual types only count what has been earned by then; types limited
  * to certain employment statuses give ineligible employees no entitlement (only manual adjustments).
  */
+/** The employee's level on a date (null when none is recorded). */
+export async function levelIdOn(tx: DbOrTx, employeeId: string, date: ISODate = todayJakarta()) {
+  const a = await tx.employeeLevelAssignment.findFirst({ where: { employeeId, ...effectiveOn(date) }, orderBy: { effectiveFrom: "desc" }, select: { levelId: true } });
+  return a?.levelId ?? null;
+}
+
+/** A request type with any exception for the employee's current level applied. */
+export async function requestTypeFor<T extends Parameters<typeof rulesForLevel>[0]>(tx: DbOrTx, type: T, employeeId: string) {
+  return rulesForLevel(type, await levelIdOn(tx, employeeId));
+}
+
 export async function leaveBalance(tx: DbOrTx, employeeId: string, requestTypeId: string, year: number, excludeRequestId?: string, asOf?: ISODate) {
-  const type = await tx.requestType.findUniqueOrThrow({ where: { id: requestTypeId } });
-  if (!type.deductsBalance) return null;
+  const baseType = await tx.requestType.findUniqueOrThrow({ where: { id: requestTypeId } });
+  if (!baseType.deductsBalance) return null;
   const [bal, emp] = await Promise.all([
     tx.leaveBalance.findUnique({ where: { employeeId_requestTypeId_year: { employeeId, requestTypeId, year } } }),
     tx.employee.findUniqueOrThrow({ where: { id: employeeId }, select: { employmentStatus: true, startDate: true, fullTimeSince: true } }),
   ]);
   const today = todayJakarta();
   const at = asOf ?? (String(year) === today.slice(0, 4) ? today : String(year) < today.slice(0, 4) ? `${year}-12-31` : `${year}-01-01`);
+  const type = rulesForLevel(baseType, await levelIdOn(tx, employeeId, at));
   const yearly = bal?.entitledDays ?? type.defaultEntitlement ?? 0;
   const eligible = !type.eligibleStatuses.length || type.eligibleStatuses.includes(emp.employmentStatus);
   const eligibleSince = type.eligibleStatuses.length ? (emp.fullTimeSince ? toISO(emp.fullTimeSince) : null) : toISO(emp.fullTimeSince ?? emp.startDate);
@@ -210,8 +223,9 @@ export async function annualRuleIssues(tx: DbOrTx, employeeId: string, type: { i
 }
 
 async function validate(tx: Tx, actor: CurrentUser, input: RequestInput, submitting: boolean) {
-  const type = await tx.requestType.findUnique({ where: { id: input.requestTypeId } });
-  if (!type || !type.isActive) throw invalid("Choose a valid request type.");
+  const baseType = await tx.requestType.findUnique({ where: { id: input.requestTypeId } });
+  if (!baseType || !baseType.isActive) throw invalid("Choose a valid request type.");
+  const type = await requestTypeFor(tx, baseType, actor.employeeId);
   if (type.category === "ADDITIONAL_WFH" || type.category === "SCHEDULE_CHANGE") throw badState("WFH / schedule changes are submitted as schedule revisions.");
   if (!isValidISO(input.startDate) || !isValidISO(input.endDate)) throw invalid("Enter valid dates.");
   if (input.endDate < input.startDate) throw invalid("End date must be on or after the start date.");
@@ -303,8 +317,9 @@ async function validate(tx: Tx, actor: CurrentUser, input: RequestInput, submitt
 // ───────────────────────────── Impact preview ─────────────────────────────
 
 export async function computeRequestImpact(actor: CurrentUser, input: Omit<RequestInput, "idempotencyKey" | "reason">) {
-  const type = await db.requestType.findUnique({ where: { id: input.requestTypeId } });
-  if (!type || !isValidISO(input.startDate) || !isValidISO(input.endDate) || input.endDate < input.startDate) return null;
+  const baseType = await db.requestType.findUnique({ where: { id: input.requestTypeId } });
+  if (!baseType || !isValidISO(input.startDate) || !isValidISO(input.endDate) || input.endDate < input.startDate) return null;
+  const type = await requestTypeFor(db, baseType, actor.employeeId);
   const settings = await getSettings();
   const holidays = await getHolidays(db, input.startDate, input.endDate);
   const { days, dates } = countRequestDays(input.startDate, input.endDate, input.durationType, holidays, settings);
@@ -671,8 +686,10 @@ export async function listMyRequests(employeeId: string) {
   });
 }
 
-export async function requestTypesForForm() {
-  return db.requestType.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } });
+/** Active request types with the rules that apply to this employee (level exceptions included). */
+export async function requestTypesForForm(employeeId: string) {
+  const [types, levelId] = await Promise.all([db.requestType.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }), levelIdOn(db, employeeId)]);
+  return types.map((t) => rulesForLevel(t, levelId));
 }
 
 export async function balancesFor(employeeId: string, year: number, asOf?: ISODate) {

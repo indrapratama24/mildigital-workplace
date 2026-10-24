@@ -8,6 +8,7 @@ import { can } from "../authz";
 import { forbidden, invalid } from "../errors";
 import { fromISO, isValidISO, todayJakarta, type ISODate } from "@/lib/dates";
 import { audit } from "./audit";
+import { requestTypeFor } from "./requests";
 import { changeLevel, setLeader, updateEmployee } from "./org";
 import { changeClientStatus, getClient, updateClient, type UpdateClientInput } from "./clients";
 import type { ClientStatusT } from "@/lib/engine/clients";
@@ -62,7 +63,7 @@ export async function adjustLeaveBalance(actor: CurrentUser, input: { employeeId
     const before = await tx.leaveBalance.findUnique({ where: key });
     const b = await tx.leaveBalance.upsert({
       where: key,
-      create: { employeeId: input.employeeId, requestTypeId: input.requestTypeId, year: input.year, entitledDays: type.defaultEntitlement ?? 0, adjustedDays: input.days },
+      create: { employeeId: input.employeeId, requestTypeId: input.requestTypeId, year: input.year, entitledDays: (await requestTypeFor(tx, type, input.employeeId)).defaultEntitlement ?? 0, adjustedDays: input.days },
       update: { adjustedDays: { increment: input.days } },
     });
     await audit(tx, { actorUserId: actor.userId, action: "leaveBalance.adjust", entityType: "LeaveBalance", entityId: b.id, before, after: b, metadata: { days: input.days, reason: input.reason.trim() } });

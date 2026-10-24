@@ -27,6 +27,8 @@ export interface RequestTypeDTO {
   allowHourly: boolean;
   deductsBalance: boolean;
   isSensitive: boolean;
+  /** Set when a level exception (e.g. Leaders) changed this type's rules for the requester. */
+  exceptionName?: string | null;
 }
 
 export interface RequestFormInitial {
@@ -201,6 +203,11 @@ export function RequestForm({ types, colleagues, initial, employeeName, today }:
             {type?.description && (
               <p className="-mt-2 flex gap-1.5 text-[12.5px] text-muted">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {type.description}
+              </p>
+            )}
+            {type?.exceptionName && (
+              <p className="-mt-2 text-[12.5px] text-brand-700">
+                Rules for {type.exceptionName} apply to you{type.advanceNoticeDays > 0 ? ` — ${type.advanceNoticeDays} days' notice` : " — no advance notice needed"}.
               </p>
             )}
 

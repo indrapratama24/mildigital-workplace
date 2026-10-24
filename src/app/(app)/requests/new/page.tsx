@@ -14,7 +14,7 @@ export default async function NewRequestPage({ searchParams }: { searchParams: P
   const sp = await searchParams;
   const today = todayJakarta();
   const [types, people, myTeam] = await Promise.all([
-    requestTypesForForm(),
+    requestTypesForForm(me.employeeId),
     db.employee.findMany({
       where: { isActive: true, id: { not: me.employeeId } },
       select: { id: true, fullName: true, memberships: { where: { isPrimary: true, ...effectiveOn(today) }, select: { teamId: true, team: { select: { name: true } } } } },

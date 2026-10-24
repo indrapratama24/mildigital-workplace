@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 
 /**
  * Tidy GET filter form: a search row, then the dropdowns in an even grid. Changing a dropdown applies it
- * immediately; on phones the dropdowns fold behind a "Filters" button showing how many are active.
+ * immediately. The dropdowns fold behind a "Filters" button showing how many are active.
  */
 export function FilterBar({
   search,
@@ -61,7 +61,7 @@ export function FilterBar({
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className={cn("inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-[13.5px] font-medium sm:hidden", activeCount ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line bg-white text-ink-2")}
+          className={cn("inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-[13.5px] font-medium", activeCount ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line bg-white text-ink-2")}
         >
           <SlidersHorizontal className="h-4 w-4" /> Filters{activeCount ? ` (${activeCount})` : ""}
         </button>
@@ -72,7 +72,7 @@ export function FilterBar({
         )}
         {right && <div className="ml-auto">{right}</div>}
       </div>
-      <div className={cn("grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] [&_select]:h-10 [&_select]:w-full", open ? "grid" : "hidden sm:grid")}>{children}</div>
+      <div className={cn("grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] [&_select]:h-10 [&_select]:w-full", open ? "grid" : "hidden")}>{children}</div>
     </form>
   );
 }

@@ -252,6 +252,22 @@ export async function upsertRequestTypeAction(input: unknown) {
         annualRules: z.boolean(),
         isSensitive: z.boolean(),
         isActive: z.boolean(),
+        levelExceptions: z
+          .array(
+            z.object({
+              name: z.string().max(60),
+              levelIds: z.array(z.string()).max(50),
+              documentRequirement: z.enum(["NONE", "OPTIONAL", "REQUIRED"]).nullable().optional(),
+              delegation: z.enum(["NONE", "OPTIONAL", "REQUIRED"]).nullable().optional(),
+              reasonMinLength: z.number().int().nullable().optional(),
+              advanceNoticeDays: z.number().int().nullable().optional(),
+              allowHalfDay: z.boolean().nullable().optional(),
+              allowHourly: z.boolean().nullable().optional(),
+              defaultEntitlement: z.number().nullable().optional(),
+            }),
+          )
+          .max(10)
+          .optional(),
       })
       .parse(input);
     await upsertRequestType(me, p);

@@ -3,7 +3,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { db } from "@/server/db";
 import { DomainError } from "@/server/errors";
 import { decide } from "@/server/services/approvals";
-import { annualRuleIssues, leaveBalance, setYearEndChoice, submitRequest, yearEndStatus } from "@/server/services/requests";
+import { annualRuleIssues, leaveBalance, requestTypesForForm, setYearEndChoice, submitRequest, yearEndStatus } from "@/server/services/requests";
+import { upsertRequestType } from "@/server/services/admin";
+import { parseLevelExceptions, type LevelException } from "@/lib/engine/request-rules";
 import { fromISO } from "@/lib/dates";
 import { buildOrg, key, pendingStepFor, resetDb, type Org } from "./helpers";
 
@@ -96,5 +98,39 @@ describe("Year-end leftover", () => {
     await approved(org.ids.junior, "2027-04-05", "2027-04-06", 2);
     const aug = await leaveBalance(db, org.ids.junior, org.types.ANNUAL, 2027, undefined, "2027-08-02");
     expect(aug?.carryIn).toBe(2); // only the carried days used before the June cut-off count
+  });
+});
+
+describe("Exceptions by level", () => {
+  const save = async (levelExceptions: LevelException[]) => {
+    const t = await db.requestType.findUniqueOrThrow({ where: { id: org.types.ANNUAL } });
+    const { createdAt: _c, updatedAt: _u, sortOrder: _s, levelExceptions: _l, description, ...rest } = t;
+    return upsertRequestType(await org.actor("admin"), { ...rest, description: description ?? undefined, levelExceptions });
+  };
+
+  it("gives leaders their own notice period and entitlement; everyone else keeps the type's rules", async () => {
+    await save([{ name: "Leaders", levelIds: [org.levels.MANAGER], advanceNoticeDays: 30, defaultEntitlement: 15 }]);
+    expect(parseLevelExceptions((await db.requestType.findUniqueOrThrow({ where: { id: org.types.ANNUAL } })).levelExceptions)).toEqual([
+      { name: "Leaders", levelIds: [org.levels.MANAGER], advanceNoticeDays: 30, defaultEntitlement: 15 },
+    ]);
+    // 21 days ahead: fine for a junior (14 days' notice), too soon for a leader (30)
+    await expectError(submitRequest(await org.actor("leader"), annual("2026-11-23", "2026-11-23")), "VALIDATION", /30 day/);
+    expect((await submitRequest(await org.actor("junior"), annual("2026-11-23", "2026-11-23"))).status).not.toBe("DRAFT");
+
+    expect((await leaveBalance(db, org.ids.leader, org.types.ANNUAL, 2026))!.yearly).toBe(15);
+    expect((await leaveBalance(db, org.ids.junior, org.types.ANNUAL, 2026))!.yearly).toBe(12);
+
+    const forLeader = (await requestTypesForForm(org.ids.leader)).find((t) => t.id === org.types.ANNUAL)!;
+    expect(forLeader).toMatchObject({ exceptionName: "Leaders", advanceNoticeDays: 30 });
+    expect((await requestTypesForForm(org.ids.junior)).find((t) => t.id === org.types.ANNUAL)).toMatchObject({ exceptionName: null, advanceNoticeDays: 14 });
+  });
+
+  it("rejects a level used twice, unknown levels and exceptions that change nothing", async () => {
+    await expectError(save([{ name: "Leaders", levelIds: [org.levels.MANAGER], advanceNoticeDays: 30 }, { name: "Seniors", levelIds: [org.levels.MANAGER, org.levels.PRINCIPAL], advanceNoticeDays: 7 }]), "VALIDATION", /only be in one/);
+    await expectError(save([{ name: "Ghosts", levelIds: ["nope"], advanceNoticeDays: 7 }]), "VALIDATION", /no longer exists/);
+    await expectError(save([{ name: "Leaders", levelIds: [org.levels.MANAGER] }]), "VALIDATION", /doesn't change/);
+    // removing all exceptions works
+    await save([]);
+    expect((await db.requestType.findUniqueOrThrow({ where: { id: org.types.ANNUAL } })).levelExceptions).toEqual([]);
   });
 });

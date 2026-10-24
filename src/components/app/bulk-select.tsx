@@ -76,7 +76,7 @@ export function BulkCell({ id, label }: { id: string; label: string }) {
   const b = useBulk();
   if (!b.active) return null;
   return (
-    <td className="w-10 !pr-0">
+    <td className="bulk-col w-10 min-w-10 !pr-0">
       <input type="checkbox" className="h-4 w-4 rounded border-line accent-brand-700" checked={b.selected.has(id)} onChange={() => b.toggle(id)} aria-label={`Select ${label}`} />
     </td>
   );
@@ -87,7 +87,7 @@ export function BulkHeaderCell({ ids }: { ids: string[] }) {
   if (!b.active) return null;
   const all = ids.length > 0 && ids.every((id) => b.selected.has(id));
   return (
-    <th className="w-10 !pr-0">
+    <th className="bulk-col w-10 min-w-10 !pr-0">
       <input type="checkbox" className="h-4 w-4 rounded border-line accent-brand-700" checked={all} onChange={() => b.setMany(ids, !all)} aria-label="Select all on this page" />
     </th>
   );

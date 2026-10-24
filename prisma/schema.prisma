@@ -625,6 +625,8 @@ model RequestType {
   eligibleStatuses    EmploymentStatus[] @default([])
   /// Annual-leave policy: usage tiers, max off days, concurrency cap and year-end cash/carry choice (Settings → Leave rules).
   annualRules         Boolean            @default(false)
+  /// Different rules for some employee levels, e.g. leaders: [{ name, levelIds, advanceNoticeDays?, ... }] (src/lib/engine/request-rules.ts).
+  levelExceptions     Json               @default("[]")
   isSensitive         Boolean            @default(false)
   isActive            Boolean            @default(true)
   sortOrder           Int                @default(0)

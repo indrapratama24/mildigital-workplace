@@ -219,7 +219,7 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
               <thead>
                 <tr>
                   <BulkHeaderCell ids={rows.map((r) => r.id)} />
-                  <th>Name & role</th>
+                  <th className="freeze-col">Name & role</th>
                   <th>Nickname</th>
                   <th>Team</th>
                   <th>Department</th>
@@ -234,7 +234,7 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
                 {rows.map((r) => (
                   <tr key={r.id} className="hover:bg-canvas/50">
                     <BulkCell id={r.id} label={r.name} />
-                    <td>
+                    <td className="freeze-col">
                       <Link href={`/directory/${r.id}`} className="flex items-center gap-2.5">
                         <Avatar name={r.name} photoId={r.photoId} />
                         <span>

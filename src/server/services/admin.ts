@@ -1,6 +1,7 @@
 // Administration: holidays, request types, departments/teams, levels, leave balances.
-import type { HolidayType, Requirement, RequestCategory, EmploymentStatus } from "@prisma/client";
-import { db, withTx } from "../db";
+import type { HolidayType, Prisma, Requirement, RequestCategory, EmploymentStatus } from "@prisma/client";
+import { db, withTx, type Tx } from "../db";
+import { OVERRIDE_KEYS, parseLevelExceptions, type LevelException } from "@/lib/engine/request-rules";
 import { fromISO, isValidISO, todayJakarta } from "@/lib/dates";
 import type { CurrentUser } from "../auth/session";
 import { can, type Permission } from "../authz";
@@ -93,6 +94,7 @@ export interface RequestTypeInput {
   annualRules: boolean;
   isSensitive: boolean;
   isActive: boolean;
+  levelExceptions?: LevelException[];
 }
 
 export async function upsertRequestType(actor: CurrentUser, input: RequestTypeInput) {
@@ -102,10 +104,33 @@ export async function upsertRequestType(actor: CurrentUser, input: RequestTypeIn
   if (input.advanceNoticeDays < 0 || input.advanceNoticeDays > 90) throw invalid("Advance notice must be 0–90 days.");
   return withTx(async (tx) => {
     const before = input.id ? await tx.requestType.findUnique({ where: { id: input.id } }) : null;
-    const { id, ...data } = input;
+    const { id, levelExceptions, ...rest } = input;
+    const data = { ...rest, ...(levelExceptions && { levelExceptions: (await checkLevelExceptions(tx, levelExceptions)) as unknown as Prisma.InputJsonValue }) };
     const t = id ? await tx.requestType.update({ where: { id }, data }) : await tx.requestType.create({ data: { ...data, sortOrder: 50 } });
     await audit(tx, { actorUserId: actor.userId, action: id ? "requestType.update" : "requestType.create", entityType: "RequestType", entityId: t.id, before, after: t });
     return t;
+  });
+}
+
+/** Validates per-level exceptions: named, real levels, each level in one exception only, sane values. */
+async function checkLevelExceptions(tx: Tx, list: LevelException[]) {
+  const levels = new Map((await tx.employeeLevel.findMany({ select: { id: true, name: true } })).map((l) => [l.id, l.name]));
+  const seen = new Map<string, string>();
+  return list.map((raw) => {
+    const e = parseLevelExceptions([raw])[0];
+    const name = (raw.name ?? "").trim();
+    if (name.length < 2 || name.length > 60) throw invalid("Give each exception a name (2–60 characters), e.g. Leaders.");
+    if (!e) throw invalid(`Choose at least one level for “${name}”.`);
+    for (const id of e.levelIds) {
+      if (!levels.has(id)) throw invalid(`“${name}” uses a level that no longer exists.`);
+      if (seen.has(id)) throw invalid(`${levels.get(id)} is in both “${seen.get(id)}” and “${name}” — a level can only be in one exception.`);
+      seen.set(id, name);
+    }
+    if (e.reasonMinLength != null && (e.reasonMinLength < 0 || e.reasonMinLength > 500)) throw invalid(`“${name}”: reason length must be 0–500.`);
+    if (e.advanceNoticeDays != null && (e.advanceNoticeDays < 0 || e.advanceNoticeDays > 90)) throw invalid(`“${name}”: advance notice must be 0–90 days.`);
+    if (e.defaultEntitlement != null && (e.defaultEntitlement < 0 || e.defaultEntitlement > 60)) throw invalid(`“${name}”: entitlement must be 0–60 days.`);
+    if (!OVERRIDE_KEYS.some((k) => e[k] != null)) throw invalid(`“${name}” doesn't change any rule yet.`);
+    return { ...e, name };
   });
 }
 
