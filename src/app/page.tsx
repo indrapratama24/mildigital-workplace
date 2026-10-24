@@ -108,10 +108,10 @@ const ILLUSTRATIVE: Preview = {
   note: { label: "Announcement", title: "Town hall — Friday, 16:00", sub: "Company update and live Q&A." },
   week: [
     { dow: "Mon", label: "WFO", tone: "wfo" },
-    { dow: "Tue", label: "WFO", tone: "wfo" },
-    { dow: "Wed", label: "WFH", tone: "wfh" },
-    { dow: "Thu", label: "Leave", tone: "leave" },
-    { dow: "Fri", label: "WFO", tone: "wfo" },
+    { dow: "Tue", label: "WFH", tone: "wfh" },
+    { dow: "Wed", label: "WFO", tone: "wfo" },
+    { dow: "Thu", label: "WFO", tone: "wfo" },
+    { dow: "Fri", label: "WFH", tone: "wfh" },
   ],
   waiting: 2,
 };
