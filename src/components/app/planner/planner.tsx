@@ -326,7 +326,7 @@ function PlannerInner({ data, employees, prevHref, nextHref }: PlannerProps) {
         <div className="space-y-4">
           {data.requirement && ev && (
             <Card>
-              <CardHeader title="WFO target" description={data.policy ? `${data.policy.name} · v${data.policy.version}${data.policy.source === "snapshot" ? " (locked at submission)" : data.policy.source === "override" ? " (override)" : ""}` : undefined} />
+              <CardHeader title="WFO target" description={data.policy ? `${data.policy.name}${data.policy.source === "snapshot" ? " (locked at submission)" : data.policy.source === "override" ? " (override)" : ""}` : undefined} />
               <CardBody className="space-y-4">
                 <div className="flex items-end justify-between">
                   <div>

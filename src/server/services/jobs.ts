@@ -1,13 +1,13 @@
 // Periodic jobs: deadline reminders, WFO shortfall detection, approval escalation.
 // Trigger via POST /api/cron (Authorization: Bearer $CRON_SECRET), `npm run cron`, or Settings → System.
-import { db } from "../db";
+import { db, withTx } from "../db";
 import { addMonths, currentMonthJakarta, formatMonth, todayJakarta } from "@/lib/dates";
 import { evaluateAttendance, evaluatePlan } from "@/lib/engine/working-days";
 import { loadMonthContexts } from "./calendar";
 import { notify } from "./notifications";
 import { getLeader } from "./org";
 import { getSettings } from "./settings";
-import { attendanceInputs } from "./schedules";
+import { attendanceInputs, autoApproveMetPlan, prefillDefaultPlan } from "./schedules";
 import { escalateOverdue } from "./approvals";
 import { refreshDynamicParticipants, sendDueReminders, sweepEventsOnOffDays } from "./events";
 
@@ -64,11 +64,18 @@ export async function runDailyJobs(now = new Date()) {
     }
   }
 
-  // 3. Escalate overdue approvals
+  // 3. Default plans: next month is prepared ahead (employees only submit if nothing changes); on the 1st,
+  //    current-month plans that were never submitted are approved when they meet the requirement.
+  let prefilled = 0;
+  const autoApproved: string[] = [];
+  for (const id of ids) if (await withTx((tx) => prefillDefaultPlan(tx, id, next.year, next.month))) prefilled++;
+  if (dayOfMonth === 1) for (const id of ids) if ((await autoApproveMetPlan(id, cur.year, cur.month)) === "approved") autoApproved.push(id);
+
+  // 4. Escalate overdue approvals
   const escalation = await escalateOverdue(now);
-  // 4. Internal Calendar: dynamic participant groups and due event reminders
+  // 5. Internal Calendar: dynamic participant groups and due event reminders
   const offDays = await sweepEventsOnOffDays(db);
   const dynamic = await refreshDynamicParticipants();
   const eventReminders = await sendDueReminders(now);
-  return { today, reminders, shortfalls, ...escalation, dynamicParticipantsAdded: dynamic.added, eventsCancelledOnOffDays: offDays.cancelled, eventReminders: eventReminders.sent };
+  return { today, reminders, shortfalls, plansPrefilled: prefilled, plansAutoApproved: autoApproved.length, ...escalation, dynamicParticipantsAdded: dynamic.added, eventsCancelledOnOffDays: offDays.cancelled, eventReminders: eventReminders.sent };
 }

@@ -155,8 +155,8 @@ export async function updatePolicyVersion(actor: CurrentUser, versionId: string,
     const { v, prev, next } = await scheduledVersion(tx, actor, versionId);
     const from = input.effectiveFrom;
     if (from < todayJakarta()) throw invalid("A version can't be moved before today.");
-    if (prev && from <= toISO(prev.effectiveFrom)) throw invalid(`Must start after v${prev.version} (${toISO(prev.effectiveFrom)}).`);
-    if (next && from >= toISO(next.effectiveFrom)) throw invalid(`Must start before v${next.version} (${toISO(next.effectiveFrom)}).`);
+    if (prev && from <= toISO(prev.effectiveFrom)) throw invalid(`Must start after the previous change (${toISO(prev.effectiveFrom)}).`);
+    if (next && from >= toISO(next.effectiveFrom)) throw invalid(`Must start before the next scheduled change (${toISO(next.effectiveFrom)}).`);
     if (prev) await tx.policyVersion.update({ where: { id: prev.id }, data: { effectiveTo: fromISO(addDays(from, -1)) } });
     const updated = await tx.policyVersion.update({
       where: { id: v.id },

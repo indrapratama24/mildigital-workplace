@@ -7,6 +7,7 @@ import { PORTFOLIO_BREAKDOWNS, portfolioSummary, type PortfolioBreakdown } from 
 import { getSettings } from "@/server/services/settings";
 import { HighlightsEditor } from "@/components/app/clients/highlights-editor";
 import { FilterBar } from "@/components/app/filter-bar";
+import { BulkCell, BulkHeaderCell, BulkProvider, BulkToggle } from "@/components/app/bulk-select";
 import { addMonths, currentMonthJakarta, formatDate, formatMonth, monthParam, parseMonthParam } from "@/lib/dates";
 import { CLIENT_STATUS_LABEL } from "@/lib/engine/clients";
 import { STATUS_TONE } from "@/components/app/clients/status";
@@ -36,6 +37,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     sort: (sp.sort as ClientFilters["sort"]) ?? "name",
     page: Number(sp.page ?? 1) || 1,
   };
+  const bulk = can(me, "client.manage");
   const [list, opts, summary, settings] = await Promise.all([listClients(me, filters), clientFilterOptions(), portfolioSummary(m.year, m.month), getSettings()]);
   const highlights = settings.clientHighlights.filter((k): k is PortfolioBreakdown => k in PORTFOLIO_BREAKDOWNS);
   const canCustomize = can(me, "clientPackage.manage");
@@ -50,13 +52,14 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const exportQs = new URLSearchParams(Object.entries(sp).filter(([k, v]) => v && k !== "page" && k !== "month") as [string, string][]).toString();
 
   return (
-    <>
+    <BulkProvider>
       <PageHeader
         eyebrow="Organization"
         title="Client & Portfolio"
         description="Every brand MIL Digital works with — current and past — with its package, assigned team and status history."
         actions={
           <>
+            {bulk && list.rows.length > 0 && <BulkToggle href="/clients/bulk" />}
             {can(me, "client.export") && (
               <a href={`/api/clients/export?${exportQs}`} className={buttonClass("secondary")}>
                 <Download className="h-4 w-4" /> Export CSV
@@ -166,6 +169,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
             <Table className="min-w-[1060px] [&_td]:whitespace-nowrap">
               <thead>
                 <tr>
+                  <BulkHeaderCell ids={list.rows.map((r) => r.id)} />
                   <th>Client ID</th>
                   <th>Brand name</th>
                   <th>Status</th>
@@ -181,6 +185,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
               <tbody>
                 {list.rows.map((r) => (
                   <tr key={r.id} className="hover:bg-canvas/50">
+                    <BulkCell id={r.id} label={r.name} />
                     <td className="font-mono text-[12.5px] text-ink-2">{r.clientCode}</td>
                     <td>
                       <Link href={`/clients/${r.id}`} className="font-medium text-ink hover:text-brand-700">{r.name}</Link>
@@ -218,7 +223,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
           </div>
         )}
       </Card>
-    </>
+    </BulkProvider>
   );
 }
 

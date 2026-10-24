@@ -122,7 +122,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
                 {m.requirement && m.policy ? (
                   <>
                     <div className="mt-1 font-display text-[22px] font-bold text-brand-700">{m.requirement.effectiveMinimumWfo} WFO <span className="text-[14px] font-medium text-muted">/ max {m.requirement.maxWfhDays} WFH</span></div>
-                    <div className="text-muted">{m.policy.version.policy.name} v{m.policy.version.version} · {m.policy.source}</div>
+                    <div className="text-muted">{m.policy.version.policy.name}</div>
                   </>
                 ) : (
                   <div className="text-danger">No policy</div>

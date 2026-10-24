@@ -99,7 +99,7 @@ export function PolicyVersionDialog({
       <Dialog
         open={open}
         onOpenChange={setOpen}
-        title={edit ? `Edit v${edit.version} · ${policyName}` : `New version · ${policyName}`}
+        title={edit ? `Edit scheduled change · ${policyName}` : `New version · ${policyName}`}
         description={
           edit
             ? "This version hasn't taken effect yet, so its rules and start date can still change. The previous version is extended or shortened to match."
@@ -190,12 +190,12 @@ export function CancelVersionButton({ id, version, fromLabel }: { id: string; ve
       <Dialog
         open={open}
         onOpenChange={setOpen}
-        title={`Cancel scheduled v${version}?`}
-        description={`It won't start on ${fromLabel}; the previous version simply continues. This is recorded in the audit log.`}
+        title="Cancel this scheduled change?"
+        description={`It won't start on ${fromLabel}; the current rules simply continue. This is recorded in the audit log.`}
         footer={
           <>
             <Button variant="secondary" onClick={() => setOpen(false)}>Keep it</Button>
-            <Button variant="danger" loading={pending} onClick={() => run(() => A.cancelPolicyVersionAction(id), () => setOpen(false))}>Cancel version</Button>
+            <Button variant="danger" loading={pending} onClick={() => run(() => A.cancelPolicyVersionAction(id), () => setOpen(false))}>Cancel change</Button>
           </>
         }
       />

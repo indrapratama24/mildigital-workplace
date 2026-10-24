@@ -95,7 +95,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ stepId:
       <PageHeader
         eyebrow={wf.subjectType === "SCHEDULE" ? "Work plan review" : "Schedule change review"}
         title={`${wf.requester.fullName} · ${formatMonth(schedule.year, schedule.month)}`}
-        description={`${wf.requester.jobTitle} · ${data.policy ? `${data.policy.name} v${data.policy.version}` : "no policy"} · submitted ${formatDateTime(wf.createdAt)}`}
+        description={`${wf.requester.jobTitle} · ${data.policy ? data.policy.name : "no policy"} · submitted ${formatDateTime(wf.createdAt)}`}
         actions={<StatusBadge status={wf.status === "PENDING" ? step.status : wf.status} />}
       />
       <div className="grid gap-5 xl:grid-cols-[1fr_380px]">

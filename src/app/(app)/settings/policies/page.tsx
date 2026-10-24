@@ -41,7 +41,7 @@ export default async function PoliciesPage() {
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-3">
                     <KV k="Min WFO" v={<b className="font-display text-[18px] text-brand-700">{current.wfoPercent}%</b>} />
                     <KV k="Max WFH" v={`${100 - current.wfoPercent}%`} />
-                    <KV k="Version" v={`v${current.version} since ${formatDate(toISO(current.effectiveFrom))}`} />
+                    <KV k="In effect since" v={formatDate(toISO(current.effectiveFrom))} />
                     <KV k="Mandatory" v={days(current.mandatoryWeekdays)} />
                     <KV k="Flexible" v={days(current.flexibleWeekdays)} />
                     <KV k="Period" v={current.evaluationPeriod.toLowerCase()} />
@@ -62,7 +62,7 @@ export default async function PoliciesPage() {
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="flex flex-wrap items-center gap-2">
                           {toISO(u.effectiveFrom) === today ? <Badge tone="success">Active from today</Badge> : <Badge tone="pending">Scheduled</Badge>}
-                          <b className="text-ink">v{u.version} from {formatDate(toISO(u.effectiveFrom))}</b>
+                          <b className="text-ink">From {formatDate(toISO(u.effectiveFrom))}</b>
                         </span>
                         <span className="flex items-center gap-1">
                           <PolicyVersionDialog policyId={p.id} policyName={p.name} current={u} defaultDate={toISO(u.effectiveFrom)} edit={{ id: u.id, version: u.version, changeNote: u.changeNote }} />
@@ -76,13 +76,12 @@ export default async function PoliciesPage() {
                     </div>
                   ))}
                 <details className="text-[12.5px]">
-                  <summary className="cursor-pointer font-medium text-brand-700">Version history ({p.versions.length})</summary>
+                  <summary className="cursor-pointer font-medium text-brand-700">Change history ({p.versions.length})</summary>
                   <Table className="mt-2">
-                    <thead><tr><th>v</th><th>WFO</th><th>Mandatory</th><th>Effective</th><th>Note</th></tr></thead>
+                    <thead><tr><th>WFO</th><th>Mandatory</th><th>Effective</th><th>Note</th></tr></thead>
                     <tbody>
                       {p.versions.map((v) => (
                         <tr key={v.id}>
-                          <td>{v.version}</td>
                           <td>{v.wfoPercent}%</td>
                           <td>{days(v.mandatoryWeekdays)}</td>
                           <td className="whitespace-nowrap">{formatDate(toISO(v.effectiveFrom))} – {v.effectiveTo ? formatDate(toISO(v.effectiveTo)) : "open"}</td>

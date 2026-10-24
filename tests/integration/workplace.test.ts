@@ -375,3 +375,33 @@ describe("Ads Strategist ad accounts", () => {
     expect(bad.rows[0].errors.join(" ")).toMatch(/TTAM/);
   });
 });
+
+describe("Client bulk edit", () => {
+  it("saves each client's own values; team and status changes are dated; failures are per client", async () => {
+    const { bulkEditClients, clientsForBulk } = await import("@/server/services/bulk");
+    const m = await manager();
+    const a = await createClient(m, input({ name: "Alpha Brand", dateStart: "2025-01-01", adAccounts: ["Meta Regular"] }));
+    const b = await createClient(m, input({ name: "Beta Brand", dateStart: "2025-01-01" }));
+    const opts = { effectiveFrom: "2026-11-02" };
+    const r = await bulkEditClients(
+      m,
+      [
+        { id: a.id, patch: { packageId: pkg.basic, adAccounts: ["Meta Regular", "TTAM"], adsStrategists: [org.ids.junior] } },
+        { id: b.id, patch: { consultant1: org.ids.peer, adsStrategists: [org.ids.junior, org.ids.peer] } }, // peer can't hold two roles
+      ],
+      opts,
+    );
+    expect(r.updated).toBe(1);
+    expect(r.failed.map((f) => [f.name, /one role/.test(f.error)])).toEqual([["Beta Brand", true]]);
+    const got = await getClient(m, a.id);
+    expect([got.package?.id, got.adAccounts, got.adsStrategists.map((p) => p.id), got.name]).toEqual([pkg.basic, ["Meta Regular", "TTAM"], [org.ids.junior], "Alpha Brand"]);
+    expect((await getClient(m, b.id)).consultant1?.id).toBe(org.ids.principal); // failed rows are left untouched
+
+    const s = await bulkEditClients(m, [{ id: a.id, patch: { status: "FREEZE" } }, { id: b.id, patch: { name: "Beta Renamed", status: "FREEZE" } }], opts);
+    expect(s).toEqual({ updated: 2, failed: [] });
+    expect((await listClients(m, { status: "FREEZE" })).rows.map((x) => x.name).sort()).toEqual(["Alpha Brand", "Beta Renamed"]);
+    expect((await clientsForBulk(m, [a.id, b.id])).map((x) => [x.name, x.status])).toEqual([["Alpha Brand", "FREEZE"], ["Beta Renamed", "FREEZE"]]);
+    await expectError(bulkEditClients(m, [{ id: a.id, patch: { packageId: pkg.advance } }], { effectiveFrom: "2026-12-01" }), "VALIDATION");
+    await expectError(bulkEditClients(await org.actor("junior"), [{ id: a.id, patch: { packageId: pkg.basic } }], opts), "FORBIDDEN");
+  });
+});

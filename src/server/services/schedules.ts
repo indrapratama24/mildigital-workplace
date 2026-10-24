@@ -29,6 +29,8 @@ export function scheduleLink(year: number, month: number, employeeId?: string) {
 
 export async function getPlannerData(viewer: CurrentUser, employeeId: string, year: number, month: number, opts: { assignedApprover?: boolean } = {}) {
   if (!opts.assignedApprover) await assertCanViewEmployee(viewer, employeeId);
+  // Your own open plan always starts from the default (mandatory WFO, the rest WFH).
+  if (viewer.employeeId === employeeId) await withTx((tx) => prefillDefaultPlan(tx, employeeId, year, month));
   const [employee, ctx] = await Promise.all([
     db.employee.findUnique({ where: { id: employeeId }, select: { id: true, fullName: true, jobTitle: true, employeeCode: true } }),
     loadMonthContext(employeeId, year, month),
@@ -307,10 +309,59 @@ export async function resetDraft(actor: CurrentUser, input: { employeeId: string
   return withTx(async (tx) => {
     const ctx = await loadMonthContext(input.employeeId, input.year, input.month, tx);
     guardEditable(ctx);
-    if (ctx.schedule) {
-      await tx.scheduleDay.updateMany({ where: { scheduleId: ctx.schedule.id }, data: { plannedMode: null } });
-      await lockMandatoryDays(tx, { ...ctx, plannedModes: {} }, ctx.schedule.id);
-    }
+    // Reset = back to the default plan (mandatory days WFO, the rest WFH).
+    const schedule = await ensureSchedule(tx, ctx);
+    await tx.scheduleDay.updateMany({ where: { scheduleId: schedule.id }, data: { plannedMode: null } });
+    await writeDraft(tx, schedule.id, defaultModes(ctx, {}));
+  });
+}
+
+// ───────────────────────────── Default plan & auto-approval ─────────────────────────────
+
+/** Default plan: mandatory WFO days are WFO, every other plannable day WFH. Only days not planned yet are returned. */
+export function defaultModes(ctx: MonthContext, planned: Record<ISODate, WorkModeT | null | undefined> = ctx.plannedModes): Record<ISODate, WorkModeT> {
+  const out: Record<ISODate, WorkModeT> = {};
+  for (const d of ctx.requirement?.days ?? []) if (d.plannable && !planned[d.date]) out[d.date] = d.mandatory ? "WFO" : "WFH";
+  return out;
+}
+
+/**
+ * Fills the unplanned days of an editable plan with the default (current and future months only), so the
+ * employee only has to submit when nothing changes. Never overwrites a planned day.
+ */
+export async function prefillDefaultPlan(tx: Tx, employeeId: string, year: number, month: number) {
+  const ctx = await loadMonthContext(employeeId, year, month, tx);
+  if (!ctx.requirement || !ctx.policy || !isEditable(ctx.schedule?.status) || isPastMonth(year, month)) return false;
+  const modes = defaultModes(ctx);
+  if (!Object.keys(modes).length) return false;
+  const schedule = await ensureSchedule(tx, ctx);
+  await writeDraft(tx, schedule.id, modes);
+  await tx.monthlySchedule.update({ where: { id: schedule.id }, data: { policyVersionId: ctx.policy.version.id } });
+  return true;
+}
+
+/**
+ * Run for the current month (daily job; meant for the 1st): a plan that was never submitted is filled with the
+ * default and, when it meets the WFO requirement without event conflicts, submitted and approved by the system.
+ * Plans that fall short stay drafts for the employee to fix.
+ */
+export async function autoApproveMetPlan(employeeId: string, year: number, month: number) {
+  return withTx(async (tx) => {
+    await prefillDefaultPlan(tx, employeeId, year, month);
+    const ctx = await loadMonthContext(employeeId, year, month, tx);
+    if (!ctx.requirement || !ctx.policy || !ctx.schedule || ctx.schedule.status !== "DRAFT") return "skipped" as const;
+    const ev = evaluatePlan(ctx.requirement, ctx.plannedModes);
+    if (!ev.complete || ev.missingMandatoryDates.length || ev.shortfall > 0) return "short" as const;
+    const conflicts = (await findConflicts(tx, employeeId, monthStart(year, month), monthEnd(year, month), ctx.plannedModes)).filter((c) => !c.exception);
+    if (conflicts.length) return "short" as const;
+    const policyVersionId = ctx.policy.version.id;
+    const days = await tx.scheduleDay.findMany({ where: { scheduleId: ctx.schedule.id } });
+    const version = await nextVersionNumber(tx, ctx.schedule.id);
+    await tx.scheduleVersion.create({ data: { scheduleId: ctx.schedule.id, version, kind: "SUBMITTED", days: snapshotDays(days), policyVersionId, actorId: null, note: "Submitted automatically: the plan meets the WFO requirement" } });
+    await tx.monthlySchedule.update({ where: { id: ctx.schedule.id }, data: { status: "SUBMITTED", submittedAt: new Date(), policyVersionId } });
+    await audit(tx, { actorUserId: null, action: "schedule.auto_approve", entityType: "MonthlySchedule", entityId: ctx.schedule.id, metadata: { year, month, eval: ev } });
+    await applyScheduleApproval(tx, ctx.schedule.id, null, "Approved automatically: your plan meets the WFO requirement.");
+    return "approved" as const;
   });
 }
 

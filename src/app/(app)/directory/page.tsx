@@ -13,6 +13,7 @@ import { Select } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
 import { LeadersEditor } from "./leaders-editor";
 import { FilterBar } from "@/components/app/filter-bar";
+import { BulkCell, BulkHeaderCell, BulkProvider, BulkToggle } from "@/components/app/bulk-select";
 
 export const metadata = { title: "Team Directory" };
 
@@ -21,6 +22,7 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
   const sp = await searchParams;
   const today = todayJakarta();
   const manageLeaders = can(me, "settings.manage");
+  const bulk = can(me, "employee.manage");
   const [{ rows, highlights: h, isHR }, hl, teams, levels, departments, titles, everyone] = await Promise.all([
     listDirectory(me, {
       q: sp.q,
@@ -50,13 +52,14 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
   const hidden = <Lock className="h-3 w-3 text-line" aria-label="Hidden by privacy settings or not filled in" />;
 
   return (
-    <>
+    <BulkProvider>
       <PageHeader
         eyebrow="Team Directory"
         title="People at MIL Digital"
         description="Who's who across every team: roles, teams, leaders and how to reach them. What each person can see follows the Directory privacy settings."
         actions={
           <>
+            {bulk && view === "list" && rows.length > 0 && <BulkToggle href="/directory/bulk" />}
             <Link href={`/directory/${me.employeeId}`} className={buttonClass("secondary")}>My profile</Link>
             {can(me, "employee.manage") && (
               <>
@@ -215,6 +218,7 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
             <Table className="min-w-[1180px] [&_td]:whitespace-nowrap">
               <thead>
                 <tr>
+                  <BulkHeaderCell ids={rows.map((r) => r.id)} />
                   <th>Name & role</th>
                   <th>Nickname</th>
                   <th>Team</th>
@@ -229,6 +233,7 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id} className="hover:bg-canvas/50">
+                    <BulkCell id={r.id} label={r.name} />
                     <td>
                       <Link href={`/directory/${r.id}`} className="flex items-center gap-2.5">
                         <Avatar name={r.name} photoId={r.photoId} />
@@ -262,6 +267,6 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
           </>
         )}
       </p>
-    </>
+    </BulkProvider>
   );
 }
