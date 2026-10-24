@@ -1306,3 +1306,45 @@ html:has(.lp) { scroll-behavior: auto; }
   .lp .domain p { margin-top: 6px; font-size: 12.5px; line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
   .lp .domains-note { font-size: 12px; }
 }
+
+/* Objectives: keep text clear of the column dividers on desktop / tablet. */
+@media (min-width: 761px) {
+  .lp .objective { padding-inline: 24px; }
+  .lp .objective:first-child { padding-left: 0; }
+  .lp .objective:last-child { padding-right: 0; }
+}
+@media (min-width: 761px) and (max-width: 1024px) {
+  .lp .objective:nth-child(3n + 1) { padding-left: 0; }
+  .lp .objective:nth-child(3n) { padding-right: 0; }
+}
+
+/* Phones: tighter vertical rhythm so the page stays short. */
+@media (max-width: 760px) {
+  .lp { --section-y: 48px; }
+  .lp .hero { padding-block: 20px 48px; }
+  .lp .hero-inner { gap: 36px; }
+  .lp .hero-proof { margin-top: 24px; }
+  .lp .section-head { gap: 14px; }
+  .lp .objectives-block { margin-top: 28px; }
+  .lp .who-grid { gap: 28px; }
+  .lp .who-body { margin-top: 16px; }
+  .lp .who-pull { margin-top: 20px; padding-top: 16px; }
+  .lp .principles { margin-top: 28px; gap: 0; }
+  .lp .principle { padding-block: 16px 20px; }
+  .lp .principle h3 { margin-top: 12px; }
+  .lp .principle p { margin-top: 6px; font-size: 15px; line-height: 1.6; }
+  .lp .values { margin-top: 32px; padding-top: 32px; }
+  .lp .value-tabs { margin-top: 20px; }
+  .lp .value-stage { margin-top: 14px; }
+  .lp .value-panels { min-height: 246px; }
+  .lp .vision { padding-block: 56px; }
+  .lp .vision-grid { gap: 28px; }
+  .lp .vision-quote { margin-top: 24px; padding-top: 18px; }
+  .lp .vision-foot { margin-top: 36px; padding-top: 22px; }
+  .lp .site-footer { padding: 40px 0 24px; }
+  .lp .footer-top { padding-bottom: 28px; }
+}
+@media (max-width: 760px) {
+  .lp .inside { margin-top: 20px; padding-top: 28px; }
+  .lp .objective:last-child { padding-bottom: 4px; }
+}
