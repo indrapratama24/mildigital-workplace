@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/misc";
 import { ContentBody } from "@/components/app/content-body";
 import { isEmptyContent } from "@/server/content";
 import { AnnouncementCard } from "@/components/app/workplace/announcement-card";
+import { SectionJump } from "@/components/app/section-jump";
 
 export const metadata = { title: "Company Hub" };
 
@@ -23,6 +24,7 @@ export default async function CompanyPage() {
         </nav>
       </aside>
       <div className="min-w-0 space-y-5">
+        <SectionJump label="Company 101" groups={[{ items: filled.map((s) => ({ id: s.key, title: s.title })) }]} />
         {news.length > 0 && (
           <Card>
             <CardHeader title={<span className="flex items-center gap-2"><Megaphone className="h-4 w-4 text-brand-600" /> Latest announcements</span>} action={<Link href="/company/announcements" className="text-[13px] font-medium text-brand-700 hover:underline">All announcements</Link>} />
@@ -33,7 +35,7 @@ export default async function CompanyPage() {
           <EmptyState icon={BookOpen} title="Company 101 is being written" description="Administrators can add the company introduction, vision, mission and more in Settings → About MIL." />
         ) : (
           filled.map((s) => (
-            <Card key={s.id} id={s.key} className="scroll-mt-24">
+            <Card key={s.id} id={s.key} className="scroll-mt-32 lg:scroll-mt-24">
               <CardHeader title={s.title} />
               <CardBody><ContentBody body={s.body} /></CardBody>
             </Card>

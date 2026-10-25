@@ -8,6 +8,7 @@ import { addDays, todayJakarta } from "@/lib/dates";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/misc";
 import { ContentBody } from "@/components/app/content-body";
+import { SectionJump } from "@/components/app/section-jump";
 import { CopyButton } from "./copy-button";
 
 export const metadata = { title: "Writing guide" };
@@ -183,7 +184,15 @@ export default async function WritingGuidePage() {
           </nav>
         </aside>
         <div className="min-w-0 space-y-5">
-          <Card id="how" className="scroll-mt-24">
+          <SectionJump
+            label="Guide"
+            groups={[
+              { items: [{ id: "how", title: "How it works" }] },
+              ...groups.map((g) => ({ label: g.group, items: g.items.map((r) => ({ id: r.id, title: r.title })) })),
+              { label: "Ready to use", items: [{ id: "template", title: "Full page template" }, { id: "ai", title: "Brief for AI assistants" }, { id: "tips", title: "Tips for a good page" }] },
+            ]}
+          />
+          <Card id="how" className="scroll-mt-32 lg:scroll-mt-24">
             <CardHeader title="How it works" />
             <CardBody>
               <ol className="grid gap-3 sm:grid-cols-3">
@@ -205,7 +214,7 @@ export default async function WritingGuidePage() {
             <section key={g.group} className="space-y-3">
               <h2 className="px-1 font-display text-[13px] font-bold uppercase tracking-[0.08em] text-subtle">{g.group}</h2>
               {g.items.map((r) => (
-                <Card key={r.id} id={r.id} className="scroll-mt-24">
+                <Card key={r.id} id={r.id} className="scroll-mt-32 lg:scroll-mt-24">
                   <CardHeader title={r.title} description={r.when} action={<CopyButton text={r.md} />} />
                   <CardBody className="grid gap-3 md:grid-cols-2">
                     <div>
@@ -223,7 +232,7 @@ export default async function WritingGuidePage() {
             </section>
           ))}
 
-          <Card id="template" className="scroll-mt-24">
+          <Card id="template" className="scroll-mt-32 lg:scroll-mt-24">
             <CardHeader title="Full page template" description="A complete example using most blocks. Copy it, change the words and paste it into the editor." action={<CopyButton text={tpl} label="Copy template" />} />
             <CardBody className="grid gap-3 lg:grid-cols-2">
               <pre className="max-h-[640px] overflow-auto whitespace-pre-wrap rounded-xl border border-line bg-canvas px-3.5 py-3 font-mono text-[12.5px] leading-relaxed text-ink">{tpl}</pre>
@@ -231,14 +240,14 @@ export default async function WritingGuidePage() {
             </CardBody>
           </Card>
 
-          <Card id="ai" className="scroll-mt-24">
+          <Card id="ai" className="scroll-mt-32 lg:scroll-mt-24">
             <CardHeader title="Brief for AI assistants" description="Paste this before your request (e.g. “Write our remote-work policy for new joiners”). The answer can be pasted straight into WORKPLACE." action={<CopyButton text={AI_BRIEF} label="Copy brief" />} />
             <CardBody>
               <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-line bg-canvas px-3.5 py-3 font-mono text-[12.5px] leading-relaxed text-ink">{AI_BRIEF}</pre>
             </CardBody>
           </Card>
 
-          <Card id="tips" className="scroll-mt-24">
+          <Card id="tips" className="scroll-mt-32 lg:scroll-mt-24">
             <CardHeader title="Tips for a good page" />
             <CardBody>
               <ul className="space-y-2 text-[13.5px] text-ink-2">
