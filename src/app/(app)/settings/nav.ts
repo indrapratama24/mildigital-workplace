@@ -35,7 +35,7 @@ export const SETTINGS_GROUPS: { label: string; items: SettingsNavItem[] }[] = [
   {
     label: "Workplace Content",
     items: [
-      { href: "/settings/content", label: "About MIL", perm: "content.manage" },
+      { href: "/settings/content", label: "About MIL & categories", perm: "content.manage" },
       { href: "/settings/regulations", label: "Regulations", perm: "content.manage" },
       { href: "/settings/announcements", label: "Announcements", perm: "content.manage" },
       { href: "/settings/recognition", label: "Recognition", perm: "content.manage" },

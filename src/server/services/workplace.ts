@@ -1,6 +1,7 @@
 // Company Hub: Company 101 content, regulations (versioned, publishable, acknowledgeable),
 // targeted announcements and recognition. Employee data is always read from the directory.
 import type { AnnouncementPriority, AudienceType, ContentStatus, Prisma, RecognitionKind } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { db, withTx, type DbOrTx } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { can } from "../authz";
@@ -27,23 +28,92 @@ function checkUrl(v: string | null | undefined) {
 
 // ───────────────────────────── Company 101 ─────────────────────────────
 
-export async function listSections(opts: { includeHidden?: boolean } = {}) {
-  return db.companyContentSection.findMany({ where: opts.includeHidden ? {} : { isPublished: true }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }] });
+/** Sections of About MIL (categoryId null) or of one custom category. */
+export async function listSections(opts: { includeHidden?: boolean; categoryId?: string | null } = {}) {
+  return db.companyContentSection.findMany({
+    where: { categoryId: opts.categoryId ?? null, ...(opts.includeHidden ? {} : { isPublished: true }) },
+    orderBy: [{ sortOrder: "asc" }, { title: "asc" }],
+  });
 }
 
-export async function saveSection(actor: CurrentUser, input: { id?: string; title: string; body: string; isPublished: boolean; sortOrder: number }) {
+export async function saveSection(actor: CurrentUser, input: { id?: string; categoryId?: string | null; title: string; body: string; isPublished: boolean; sortOrder: number }) {
   requireEditor(actor);
   if (input.title.trim().length < 2) throw invalid("Section title is required.");
   const body = sanitizeContent(input.body);
   return withTx(async (tx) => {
     const before = input.id ? await tx.companyContentSection.findUnique({ where: { id: input.id } }) : null;
     if (input.id && !before) throw notFound("Section");
+    if (!input.id && input.categoryId && !(await tx.companyHubCategory.findUnique({ where: { id: input.categoryId } }))) throw notFound("Category");
     const data = { title: input.title.trim(), body, isPublished: input.isPublished, sortOrder: input.sortOrder, updatedById: actor.userId };
     const saved = input.id
       ? await tx.companyContentSection.update({ where: { id: input.id }, data })
-      : await tx.companyContentSection.create({ data: { ...data, key: `custom_${Date.now().toString(36)}` } });
+      : await tx.companyContentSection.create({ data: { ...data, categoryId: input.categoryId ?? null, key: `custom_${Date.now().toString(36)}${randomUUID().slice(0, 6)}` } });
     await audit(tx, { actorUserId: actor.userId, action: input.id ? "content.section.update" : "content.section.create", entityType: "CompanyContentSection", entityId: saved.id, before, after: saved });
     return saved;
+  });
+}
+
+export async function deleteSection(actor: CurrentUser, id: string) {
+  requireEditor(actor);
+  return withTx(async (tx) => {
+    const before = await tx.companyContentSection.findUnique({ where: { id } });
+    if (!before) throw notFound("Section");
+    await tx.companyContentSection.delete({ where: { id } });
+    await audit(tx, { actorUserId: actor.userId, action: "content.section.delete", entityType: "CompanyContentSection", entityId: id, before });
+  });
+}
+
+// ───────────────────────────── Hub categories ─────────────────────────────
+// Custom tabs next to the built-in ones (About MIL, Announcements, Regulations, Recognition).
+
+const RESERVED_SLUGS = new Set(["about", "about-mil", "announcements", "regulations", "recognition", "new", "settings"]);
+export const slugify = (t: string) =>
+  t.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+
+export async function listHubCategories(opts: { includeHidden?: boolean } = {}) {
+  return db.companyHubCategory.findMany({
+    where: opts.includeHidden ? {} : { isPublished: true },
+    orderBy: [{ sortOrder: "asc" }, { title: "asc" }],
+    include: { _count: { select: { sections: true } } },
+  });
+}
+
+export async function hubCategoryBySlug(slug: string) {
+  return db.companyHubCategory.findFirst({ where: { slug, isPublished: true } });
+}
+
+export async function saveHubCategory(actor: CurrentUser, input: { id?: string; title: string; description?: string | null; isPublished: boolean; sortOrder: number }) {
+  requireEditor(actor);
+  const title = input.title.trim();
+  if (title.length < 2 || title.length > 40) throw invalid("Category name must be 2–40 characters.");
+  return withTx(async (tx) => {
+    const before = input.id ? await tx.companyHubCategory.findUnique({ where: { id: input.id } }) : null;
+    if (input.id && !before) throw notFound("Category");
+    const clash = await tx.companyHubCategory.findFirst({ where: { title: { equals: title, mode: "insensitive" }, NOT: input.id ? { id: input.id } : undefined } });
+    if (clash || ["about mil", "announcements", "regulations", "recognition"].includes(title.toLowerCase())) throw invalid("A Company Hub tab with this name already exists.");
+    const data = { title, description: clean(input.description), isPublished: input.isPublished, sortOrder: input.sortOrder };
+    let saved;
+    if (before) saved = await tx.companyHubCategory.update({ where: { id: before.id }, data });
+    else {
+      // The slug is the tab's address; it is fixed at creation so shared links keep working after a rename.
+      const base = slugify(title) || "page";
+      let slug = RESERVED_SLUGS.has(base) ? `${base}-page` : base;
+      for (let n = 2; await tx.companyHubCategory.findUnique({ where: { slug } }); n++) slug = `${base}-${n}`;
+      saved = await tx.companyHubCategory.create({ data: { ...data, slug } });
+    }
+    await audit(tx, { actorUserId: actor.userId, action: before ? "content.category.update" : "content.category.create", entityType: "CompanyHubCategory", entityId: saved.id, before, after: saved });
+    return saved;
+  });
+}
+
+/** Deletes the category and all of its sections. */
+export async function deleteHubCategory(actor: CurrentUser, id: string) {
+  requireEditor(actor);
+  return withTx(async (tx) => {
+    const before = await tx.companyHubCategory.findUnique({ where: { id }, include: { sections: { select: { id: true, title: true } } } });
+    if (!before) throw notFound("Category");
+    await tx.companyHubCategory.delete({ where: { id } });
+    await audit(tx, { actorUserId: actor.userId, action: "content.category.delete", entityType: "CompanyHubCategory", entityId: id, before });
   });
 }
 

@@ -1147,15 +1147,33 @@ enum ContentStatus {
 
 /// Company 101 sections (About MIL). Keyed so pages can reference a section; text is lightweight Markdown.
 model CompanyContentSection {
-  id          String   @id @default(cuid())
-  key         String   @unique
+  id          String              @id @default(cuid())
+  key         String              @unique
+  /// null = About MIL; otherwise a custom Company Hub category
+  categoryId  String?
+  category    CompanyHubCategory? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   title       String
-  body        String   @default("")
-  sortOrder   Int      @default(0)
-  isPublished Boolean  @default(true)
+  body        String              @default("")
+  sortOrder   Int                 @default(0)
+  isPublished Boolean             @default(true)
   updatedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([categoryId])
+}
+
+/// A custom Company Hub tab (next to About MIL) made of sections like Company 101.
+model CompanyHubCategory {
+  id          String                  @id @default(cuid())
+  slug        String                  @unique
+  title       String
+  description String?
+  sortOrder   Int                     @default(0)
+  isPublished Boolean                 @default(true)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  sections    CompanyContentSection[]
 }
 
 model CompanyRegulation {

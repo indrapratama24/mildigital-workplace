@@ -139,7 +139,7 @@ export function PlatformForm({ knowledgeHubUrl }: { knowledgeHubUrl: string | nu
 
 type Section = { id?: string; title: string; body: string; isPublished: boolean; sortOrder: number };
 
-export function SectionEditor({ section, people = [] }: { section?: Section & { id: string }; people?: Person[] }) {
+export function SectionEditor({ section, categoryId = null, people = [] }: { section?: Section & { id: string }; categoryId?: string | null; people?: Person[] }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<Section>(section ?? { title: "", body: "", isPublished: true, sortOrder: 50 });
   const { pending, run } = useRun();
@@ -158,7 +158,7 @@ export function SectionEditor({ section, people = [] }: { section?: Section & { 
         footer={
           <>
             <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button loading={pending} disabled={f.title.trim().length < 2} onClick={() => run(() => W.saveSectionAction({ ...f, id: section?.id }), () => setOpen(false))}>Save section</Button>
+            <Button loading={pending} disabled={f.title.trim().length < 2} onClick={() => run(() => W.saveSectionAction({ ...f, id: section?.id, categoryId }), () => setOpen(false))}>Save section</Button>
           </>
         }
       >
@@ -169,6 +169,87 @@ export function SectionEditor({ section, people = [] }: { section?: Section & { 
         <div className="mt-3">
           {open && <RichEditor value={f.body} onChange={(body) => setF((p) => ({ ...p, body }))} people={people} minHeight={320} />}
         </div>
+        <div className="mt-3"><Checkbox checked={f.isPublished} onChange={(e) => setF({ ...f, isPublished: e.target.checked })} label="Visible in the Company Hub" /></div>
+      </Dialog>
+    </>
+  );
+}
+
+/** A trash button that asks before deleting a Company Hub section or category. */
+export function ConfirmDelete({ kind, id, title, description, label = "Delete" }: { kind: "section" | "category"; id: string; title: string; description: React.ReactNode; label?: string }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const { pending, run } = useRun();
+  return (
+    <>
+      <Button size="sm" variant="ghost" className="text-danger" aria-label={`${label} ${title}`} title={label} onClick={() => setOpen(true)}><Trash2 className="h-3.5 w-3.5" /></Button>
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title={`${label} “${title}”?`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="danger" loading={pending} onClick={() =>
+                run(kind === "section" ? () => W.deleteSectionAction({ id }) : () => W.deleteHubCategoryAction({ id }), () => {
+                  setOpen(false);
+                  if (kind === "category") router.replace("/settings/content");
+                })
+              }
+            >
+              {label}</Button>
+          </>
+        }
+      >
+        <p className="text-[14px] text-ink-2">{description}</p>
+      </Dialog>
+    </>
+  );
+}
+
+type Category = { title: string; description: string; isPublished: boolean; sortOrder: number };
+
+export function CategoryEditor({ category }: { category?: Category & { id: string } }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState<Category>(category ?? { title: "", description: "", isPublished: true, sortOrder: 50 });
+  const router = useRouter();
+  const { pending, run } = useRun();
+  return (
+    <>
+      {category ? (
+        <Button size="sm" variant="ghost" onClick={() => { setF(category); setOpen(true); }}><Pencil className="h-3.5 w-3.5" /> Edit</Button>
+      ) : (
+        <Button size="sm" variant="secondary" onClick={() => { setF({ title: "", description: "", isPublished: true, sortOrder: 50 }); setOpen(true); }}><Plus className="h-3.5 w-3.5" /> Add category</Button>
+      )}
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title={category ? `Edit · ${category.title}` : "New Company Hub category"}
+        description="A category is a new tab in the Company Hub, built from sections like About MIL."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button
+              loading={pending}
+              disabled={f.title.trim().length < 2}
+              onClick={() =>
+                run(() => W.saveHubCategoryAction({ ...f, id: category?.id }), (r) => {
+                  setOpen(false);
+                  const id = (r.data as { id?: string } | undefined)?.id;
+                  if (!category && id) router.push(`/settings/content?category=${id}`);
+                })
+              }
+            >
+              {category ? "Save category" : "Create category"}
+            </Button>
+          </>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-[1fr_100px]">
+          <Field label="Name" hint="Shown as the tab name, e.g. Benefits or Onboarding."><Input value={f.title} maxLength={40} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
+          <Field label="Order"><Input type="number" value={f.sortOrder} onChange={(e) => setF({ ...f, sortOrder: Number(e.target.value) })} /></Field>
+        </div>
+        <div className="mt-3"><Field label="Short description (optional)"><Input value={f.description} maxLength={200} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field></div>
         <div className="mt-3"><Checkbox checked={f.isPublished} onChange={(e) => setF({ ...f, isPublished: e.target.checked })} label="Visible in the Company Hub" /></div>
       </Dialog>
     </>

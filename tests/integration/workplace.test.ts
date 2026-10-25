@@ -17,6 +17,13 @@ import {
   publishRegulation,
   saveAnnouncement,
   saveRegulationDraft,
+  saveSection,
+  deleteSection,
+  listSections,
+  saveHubCategory,
+  deleteHubCategory,
+  listHubCategories,
+  hubCategoryBySlug,
 } from "@/server/services/workplace";
 import { setGrants } from "@/server/services/access";
 import { fromISO } from "@/lib/dates";
@@ -403,5 +410,34 @@ describe("Client bulk edit", () => {
     expect((await clientsForBulk(m, [a.id, b.id])).map((x) => [x.name, x.status])).toEqual([["Alpha Brand", "FREEZE"], ["Beta Renamed", "FREEZE"]]);
     await expectError(bulkEditClients(m, [{ id: a.id, patch: { packageId: pkg.advance } }], { effectiveFrom: "2026-12-01" }), "VALIDATION");
     await expectError(bulkEditClients(await org.actor("junior"), [{ id: a.id, patch: { packageId: pkg.basic } }], opts), "FORBIDDEN");
+  });
+});
+
+describe("Company Hub categories", () => {
+  it("adds, renames and deletes a category with its sections", async () => {
+    const admin = await org.actor("admin");
+    const about = await saveSection(admin, { title: "Vision", body: "", isPublished: true, sortOrder: 1 });
+    const cat = await saveHubCategory(admin, { title: "Benefits & Perks", isPublished: true, sortOrder: 1 });
+    expect(cat.slug).toBe("benefits-and-perks");
+    await saveSection(admin, { categoryId: cat.id, title: "Health insurance", body: "", isPublished: true, sortOrder: 1 });
+    expect((await listSections({ categoryId: cat.id })).map((s) => s.title)).toEqual(["Health insurance"]);
+    expect((await listSections()).map((s) => s.title)).toEqual(["Vision"]); // About MIL keeps its own sections
+
+    const renamed = await saveHubCategory(admin, { id: cat.id, title: "Perks", isPublished: true, sortOrder: 1 });
+    expect(renamed.slug).toBe("benefits-and-perks"); // links keep working
+    expect((await saveHubCategory(admin, { title: "Recognition page", isPublished: true, sortOrder: 2 })).slug).toBe("recognition-page");
+    await expectError(saveHubCategory(admin, { title: "perks", isPublished: true, sortOrder: 3 }), "VALIDATION");
+    await expectError(saveHubCategory(admin, { title: "Regulations", isPublished: true, sortOrder: 3 }), "VALIDATION");
+    await expectError(saveHubCategory(await org.actor("junior"), { title: "Mine", isPublished: true, sortOrder: 3 }), "FORBIDDEN");
+
+    await saveHubCategory(admin, { id: cat.id, title: "Perks", isPublished: false, sortOrder: 1 });
+    expect(await hubCategoryBySlug("benefits-and-perks")).toBeNull();
+    expect((await listHubCategories()).map((c) => c.title)).toEqual(["Recognition page"]);
+
+    await deleteHubCategory(admin, cat.id);
+    expect(await db.companyContentSection.count({ where: { categoryId: cat.id } })).toBe(0);
+    await deleteSection(admin, about.id);
+    expect(await listSections({ includeHidden: true })).toEqual([]);
+    await expectError(deleteSection(admin, about.id), "NOT_FOUND");
   });
 });

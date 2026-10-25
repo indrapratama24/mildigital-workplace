@@ -15,6 +15,9 @@ import {
   saveRecognition,
   saveRegulationDraft,
   saveSection,
+  deleteSection,
+  saveHubCategory,
+  deleteHubCategory,
   setAnnouncementStatus,
   setRegulationArchived,
 } from "../services/workplace";
@@ -191,10 +194,38 @@ export async function updateClientRulesAction(input: unknown) {
 export async function saveSectionAction(input: unknown) {
   return runAction(async () => {
     const me = await requireUser();
-    const p = z.object({ id: z.string().optional(), title: z.string().max(120), body: z.string().max(400000), isPublished: z.boolean(), sortOrder: z.number().int().min(0).max(999) }).parse(input);
+    const p = z.object({ id: z.string().optional(), categoryId: z.string().nullable().optional(), title: z.string().max(120), body: z.string().max(400000), isPublished: z.boolean(), sortOrder: z.number().int().min(0).max(999) }).parse(input);
     await saveSection(me, p);
     refresh();
   }, "Section saved");
+}
+
+export async function deleteSectionAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    const p = z.object({ id: z.string() }).parse(input);
+    await deleteSection(me, p.id);
+    refresh();
+  }, "Section deleted");
+}
+
+export async function saveHubCategoryAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    const p = z.object({ id: z.string().optional(), title: z.string().max(40), description: optText(200), isPublished: z.boolean(), sortOrder: z.number().int().min(0).max(999) }).parse(input);
+    const saved = await saveHubCategory(me, p);
+    refresh();
+    return { id: saved.id };
+  }, "Category saved");
+}
+
+export async function deleteHubCategoryAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requireUser();
+    const p = z.object({ id: z.string() }).parse(input);
+    await deleteHubCategory(me, p.id);
+    refresh();
+  }, "Category deleted");
 }
 
 const regulation = z.object({
