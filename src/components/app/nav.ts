@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   TrendingUp,
   UsersRound,
+  FileBarChart,
   type LucideIcon,
 } from "lucide-react";
 import type { Permission } from "@/server/authz";
@@ -46,6 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "requests", feature: "requests", href: "/requests", label: "Requests & Approvals", icon: Inbox, badgeKey: "approvals", match: ["/requests", "/approvals", "/delegations"] },
       { id: "team-calendar", href: "/team-calendar", label: "Team Calendar", icon: UsersRound, any: ["team.view"] },
       { id: "compliance", href: "/compliance", label: "Attendance & Compliance", icon: ShieldCheck },
+      { id: "leave-report", href: "/reports/leave", label: "Leave & Permission Report", icon: FileBarChart, any: ["team.view", "company.view"] },
     ],
   },
   {

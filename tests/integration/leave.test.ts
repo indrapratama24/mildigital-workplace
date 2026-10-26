@@ -5,6 +5,7 @@ import { DomainError } from "@/server/errors";
 import { decide } from "@/server/services/approvals";
 import { annualRuleIssues, leaveBalance, requestTypesForForm, setYearEndChoice, submitRequest, yearEndStatus } from "@/server/services/requests";
 import { upsertRequestType } from "@/server/services/admin";
+import { filtersFromParams, leaveCsv, leaveReportRows, resolvePeriod, summarizeLeave } from "@/server/services/leave-report";
 import { parseLevelExceptions, type LevelException } from "@/lib/engine/request-rules";
 import { fromISO } from "@/lib/dates";
 import { buildOrg, key, pendingStepFor, resetDb, type Org } from "./helpers";
@@ -132,5 +133,47 @@ describe("Exceptions by level", () => {
     // removing all exceptions works
     await save([]);
     expect((await db.requestType.findUniqueOrThrow({ where: { id: org.types.ANNUAL } })).levelExceptions).toEqual([]);
+  });
+});
+
+describe("Leave & permission report", () => {
+  it("scopes by viewer, counts approved days and hours, and skips drafts", async () => {
+    const perm = (await db.requestType.create({ data: { code: "PERM", name: "Permission", category: "PERMISSION", delegation: "NONE", reasonMinLength: 1, allowHourly: true } })).id;
+    const mk = (who: string, typeId: string, start: string, end: string, status: "APPROVED" | "REJECTED" | "DRAFT" | "PENDING_LEADER", days: number, extra: object = {}) =>
+      db.request.create({ data: { employeeId: org.ids[who], requestTypeId: typeId, status, startDate: fromISO(start), endDate: fromISO(end), workingDays: days, reason: "x", idempotencyKey: key(), ...extra } });
+    await mk("junior", org.types.ANNUAL, "2026-03-02", "2026-03-04", "APPROVED", 3);
+    await mk("junior", perm, "2026-03-10", "2026-03-10", "APPROVED", 0.25, { durationType: "HOURLY", startTime: "09:00", endTime: "11:30" });
+    await mk("principal", org.types.SICK, "2026-04-06", "2026-04-06", "APPROVED", 1);
+    await mk("peer", org.types.ANNUAL, "2026-04-13", "2026-04-14", "REJECTED", 2);
+    await mk("peer", org.types.ANNUAL, "2026-05-04", "2026-05-04", "DRAFT", 1);
+    await mk("hr", org.types.ANNUAL, "2026-05-11", "2026-05-11", "PENDING_LEADER", 1);
+    await mk("junior", org.types.ANNUAL, "2025-12-29", "2025-12-30", "APPROVED", 2); // last year
+
+    const year = { from: "2026-01-01", to: "2026-12-31" };
+    const all = await leaveReportRows(await org.actor("hr"), year);
+    expect(all).toHaveLength(5); // no draft, nothing from 2025
+    const s = summarizeLeave(all);
+    expect(s.totals).toMatchObject({ requests: 5, approved: 3, days: 4, hours: 2.5, pending: 1, rejected: 1, people: 4 });
+    expect(s.topDays.map((p) => p.name)).toEqual(["junior", "principal"]);
+    expect(s.topPermissions.map((p) => [p.name, p.byCategory.PERMISSION, p.hours])).toEqual([["junior", 1, 2.5]]);
+    expect(s.byMonth.map((m) => m.month)).toEqual(["2026-03", "2026-04"]);
+
+    // a leader sees only themself and their direct reports; an employee can't open the report
+    const mine = await leaveReportRows(await org.actor("leader"), year);
+    expect(new Set(mine.map((r) => r.fullName))).toEqual(new Set(["junior", "principal", "peer"]));
+    expect(await leaveReportRows(await org.actor("leader"), { ...year, employeeId: org.ids.hr })).toEqual([]);
+    await expectError(leaveReportRows(await org.actor("junior"), year), "FORBIDDEN");
+
+    expect((await leaveReportRows(await org.actor("hr"), { ...year, category: "PERMISSION" })).map((r) => r.hours)).toEqual([2.5]);
+    expect((await leaveReportRows(await org.actor("hr"), { ...year, status: "REJECTED" })).map((r) => r.fullName)).toEqual(["peer"]);
+    expect(leaveCsv(all).split("\n")).toHaveLength(6);
+  });
+
+  it("resolves periods", () => {
+    expect(resolvePeriod("quarter", undefined, undefined, "2026-11-02")).toEqual({ period: "quarter", from: "2026-10-01", to: "2026-12-31" });
+    expect(resolvePeriod("last-month", undefined, undefined, "2026-01-15")).toEqual({ period: "last-month", from: "2025-12-01", to: "2025-12-31" });
+    expect(resolvePeriod(undefined, undefined, undefined, "2026-11-02")).toEqual({ period: "year", from: "2026-01-01", to: "2026-12-31" });
+    expect(resolvePeriod("custom", "2026-02-01", "2026-02-10", "2026-11-02")).toEqual({ period: "custom", from: "2026-02-01", to: "2026-02-10" });
+    expect(filtersFromParams((k) => ({ status: "BOGUS", category: "LEAVE" })[k]).status).toBeUndefined();
   });
 });
