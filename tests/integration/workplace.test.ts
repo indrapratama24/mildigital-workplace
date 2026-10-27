@@ -4,7 +4,8 @@ import { db } from "@/server/db";
 import { DomainError } from "@/server/errors";
 import { can } from "@/server/authz";
 import { changeClientStatus, clientsForEmployee, createClient, getClient, listClients, removePackage, updateClient, type CreateClientInput } from "@/server/services/clients";
-import { portfolioSummary } from "@/server/services/client-metrics";
+import { portfolioSummary, portfolioVisibleFor } from "@/server/services/client-metrics";
+import { DEFAULT_SETTINGS, getSettings, updateSettings } from "@/server/services/settings";
 import { clientCsvTemplate, importClientsCsv } from "@/server/services/client-import";
 import { CLIENT_CSV_COLUMNS, clientsExportCsv } from "@/server/services/clients";
 import {
@@ -439,5 +440,25 @@ describe("Company Hub categories", () => {
     await deleteSection(admin, about.id);
     expect(await listSections({ includeHidden: true })).toEqual([]);
     await expectError(deleteSection(admin, about.id), "NOT_FOUND");
+  });
+});
+
+describe("Portfolio visibility per role", () => {
+  it("shows employees nothing by default, leaders/HR everything, managers always all", async () => {
+    const s = await getSettings();
+    expect(portfolioVisibleFor(await org.actor("junior"), s)!.size).toBe(0);
+    expect(portfolioVisibleFor(await org.actor("leader"), s)!.has("consultant")).toBe(true);
+    expect(portfolioVisibleFor(await org.actor("hr"), s)!.has("active")).toBe(true);
+    expect(portfolioVisibleFor(await org.actor("admin"), s)).toBeNull();
+
+    const admin = await org.actor("admin");
+    await updateSettings(admin, { clientPortfolioVisibility: { ...DEFAULT_SETTINGS.clientPortfolioVisibility, EMPLOYEE: ["active", "package"], HR: ["total"] } });
+    const after = await getSettings();
+    expect([...portfolioVisibleFor(await org.actor("junior"), after)!]).toEqual(["active", "package"]);
+    expect(portfolioVisibleFor(await org.actor("hr"), after)!.has("active")).toBe(false);
+
+    const hr = await org.actor("hr");
+    await setGrants(admin, hr.userId, ["clientPackage.manage"]);
+    expect(portfolioVisibleFor(await org.actor("hr"), after)).toBeNull();
   });
 });

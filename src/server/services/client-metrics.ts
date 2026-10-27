@@ -4,7 +4,10 @@
 import { db } from "../db";
 import { addMonths, fromISO, monthEnd, monthStart, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { isNewIn, type ClientStatusT } from "@/lib/engine/clients";
-import { getSettings } from "./settings";
+import { getSettings, type AppSettings } from "./settings";
+import type { CurrentUser } from "../auth/session";
+import { can } from "../authz";
+import type { VisibilityRole } from "@/lib/portfolio-visibility";
 
 async function brandsWithHistory() {
   return db.clientBrand.findMany({
@@ -130,3 +133,9 @@ export const PORTFOLIO_BREAKDOWNS = {
   adAccount: { title: "Active by ad account", key: "byAdAccount" },
 } as const;
 export type PortfolioBreakdown = keyof typeof PORTFOLIO_BREAKDOWNS;
+
+/** Portfolio stat and breakdown keys this user may see; null = everything. */
+export function portfolioVisibleFor(user: CurrentUser, settings: AppSettings): Set<string> | null {
+  if (user.role === "SUPER_ADMIN" || can(user, "clientPackage.manage")) return null;
+  return new Set(settings.clientPortfolioVisibility[user.role as VisibilityRole] ?? []);
+}

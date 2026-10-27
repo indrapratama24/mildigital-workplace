@@ -25,6 +25,8 @@ import { setGrants } from "../services/access";
 import { setProfilePhoto } from "../services/people";
 import { saveUpload } from "../services/files";
 import { updateSettings } from "../services/settings";
+import { PORTFOLIO_BREAKDOWNS, type PortfolioBreakdown } from "../services/client-metrics";
+import { PORTFOLIO_STATS, type PortfolioStat } from "@/lib/portfolio-visibility";
 
 const refresh = () => revalidatePath("/", "layout");
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date");
@@ -179,6 +181,17 @@ export async function updateClientHighlightsAction(input: unknown) {
     await updateSettings(me, { clientHighlights: [...new Set(p)] });
     refresh();
   }, "Highlights saved");
+}
+
+export async function updateClientVisibilityAction(input: unknown) {
+  return runAction(async () => {
+    const me = await requirePermission("clientPackage.manage");
+    const allowed = new Set<string>([...(Object.keys(PORTFOLIO_STATS) as PortfolioStat[]), ...(Object.keys(PORTFOLIO_BREAKDOWNS) as PortfolioBreakdown[])]);
+    const keys = z.array(z.string().refine((k) => allowed.has(k), "Unknown item")).max(20);
+    const p = z.object({ EMPLOYEE: keys, LEADER: keys, HR: keys }).parse(input);
+    await updateSettings(me, { clientPortfolioVisibility: { EMPLOYEE: [...new Set(p.EMPLOYEE)], LEADER: [...new Set(p.LEADER)], HR: [...new Set(p.HR)] } });
+    refresh();
+  }, "Visibility saved");
 }
 
 export async function updateClientRulesAction(input: unknown) {

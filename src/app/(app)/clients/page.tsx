@@ -3,9 +3,11 @@ import { Briefcase, CircleCheck, CirclePause, CircleX, Download, Hourglass, Laye
 import { requirePageUser } from "@/server/auth/guard";
 import { can } from "@/server/authz";
 import { clientFilterOptions, listClients, type ClientFilters } from "@/server/services/clients";
-import { PORTFOLIO_BREAKDOWNS, portfolioSummary, type PortfolioBreakdown } from "@/server/services/client-metrics";
+import { PORTFOLIO_BREAKDOWNS, portfolioSummary, portfolioVisibleFor, type PortfolioBreakdown } from "@/server/services/client-metrics";
+import { PORTFOLIO_STATS, type PortfolioStat } from "@/lib/portfolio-visibility";
 import { getSettings } from "@/server/services/settings";
 import { HighlightsEditor } from "@/components/app/clients/highlights-editor";
+import { VisibilityEditor } from "@/components/app/clients/visibility-editor";
 import { FilterBar } from "@/components/app/filter-bar";
 import { BulkCell, BulkHeaderCell, BulkProvider, BulkToggle } from "@/components/app/bulk-select";
 import { addMonths, currentMonthJakarta, formatDate, formatMonth, monthParam, parseMonthParam } from "@/lib/dates";
@@ -39,8 +41,12 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   };
   const bulk = can(me, "client.manage");
   const [list, opts, summary, settings] = await Promise.all([listClients(me, filters), clientFilterOptions(), portfolioSummary(m.year, m.month), getSettings()]);
-  const highlights = settings.clientHighlights.filter((k): k is PortfolioBreakdown => k in PORTFOLIO_BREAKDOWNS);
+  const visible = portfolioVisibleFor(me, settings);
+  const sees = (k: string) => !visible || visible.has(k);
+  const highlights = settings.clientHighlights.filter((k): k is PortfolioBreakdown => k in PORTFOLIO_BREAKDOWNS && sees(k));
   const canCustomize = can(me, "clientPackage.manage");
+  const stats = (Object.keys(PORTFOLIO_STATS) as PortfolioStat[]).filter(sees);
+  const showPortfolio = stats.length > 0 || highlights.length > 0 || canCustomize;
   const prev = addMonths(m.year, m.month, -1);
   const next = addMonths(m.year, m.month, 1);
   const isCurrent = m.year === cur.year && m.month === cur.month;
@@ -79,6 +85,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         }
       />
 
+      {showPortfolio && <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-[17px] font-bold text-ink">
           Portfolio · {formatMonth(m.year, m.month)}
@@ -90,18 +97,27 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
           {!isCurrent && <Link href={qs({ month: monthParam(next.year, next.month), page: undefined })} className="rounded-full px-3 py-1 text-ink-2 hover:text-brand-700">{formatMonth(next.year, next.month)} →</Link>}
         </div>
       </div>
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Stat label="Active clients" value={summary.active} icon={CircleCheck} tone="success" hint={summary.freezeCountsAsActive ? "incl. freeze" : undefined} />
-        <Stat label="Preparation" value={summary.preparation} icon={Hourglass} hint="starting soon — not counted yet" />
-        <Stat label="Freeze" value={summary.freeze} icon={CirclePause} hint={summary.freezeCountsAsActive ? "counted as active" : "not counted as active"} />
-        <Stat label="Inactive" value={summary.inactive} icon={CircleX} />
-        <Stat label="Total clients" value={summary.total} icon={Briefcase} tone="brand" />
-        <Stat label={isCurrent ? "New this month" : "New in month"} value={summary.newThisPeriod} icon={Sparkles} hint="first collaboration starts" />
-      </div>
+      {stats.length > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {sees("active") && <Stat label="Active clients" value={summary.active} icon={CircleCheck} tone="success" hint={summary.freezeCountsAsActive ? "incl. freeze" : undefined} />}
+          {sees("preparation") && <Stat label="Preparation" value={summary.preparation} icon={Hourglass} hint="starting soon — not counted yet" />}
+          {sees("freeze") && <Stat label="Freeze" value={summary.freeze} icon={CirclePause} hint={summary.freezeCountsAsActive ? "counted as active" : "not counted as active"} />}
+          {sees("inactive") && <Stat label="Inactive" value={summary.inactive} icon={CircleX} />}
+          {sees("total") && <Stat label="Total clients" value={summary.total} icon={Briefcase} tone="brand" />}
+          {sees("new") && <Stat label={isCurrent ? "New this month" : "New in month"} value={summary.newThisPeriod} icon={Sparkles} hint="first collaboration starts" />}
+        </div>
+      )}
       {(highlights.length > 0 || canCustomize) && (
         <div className="mb-5">
           {canCustomize && (
-            <div className="mb-2 flex justify-end">
+            <div className="mb-2 flex flex-wrap justify-end gap-1">
+              <VisibilityEditor
+                value={settings.clientPortfolioVisibility}
+                groups={[
+                  { label: "Numbers", items: Object.entries(PORTFOLIO_STATS).map(([key, title]) => ({ key, title })) },
+                  { label: "Breakdowns", items: Object.entries(PORTFOLIO_BREAKDOWNS).map(([key, v]) => ({ key, title: v.title, note: settings.clientHighlights.includes(key) ? undefined : "not shown" })) },
+                ]}
+              />
               <HighlightsEditor options={Object.entries(PORTFOLIO_BREAKDOWNS).map(([key, v]) => ({ key, title: v.title }))} selected={highlights} />
             </div>
           )}
@@ -112,6 +128,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
           </div>
         </div>
       )}
+      </>}
 
       <Card>
         <FilterBar

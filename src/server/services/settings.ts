@@ -1,6 +1,7 @@
 import { db, type DbOrTx } from "../db";
 import { DEFAULT_ANNUAL_RULES, type AnnualLeaveRules } from "@/lib/engine/leave";
 import { audit } from "./audit";
+import type { PortfolioVisibility } from "@/lib/portfolio-visibility";
 
 export interface AppSettings {
   workingWeekdays: number[];
@@ -26,6 +27,8 @@ export interface AppSettings {
   directoryLeaders: { employeeId: string; caption: string | null }[] | null;
   /** Portfolio breakdown charts shown on Client & Portfolio, in order. */
   clientHighlights: string[];
+  /** Portfolio stats and breakdowns each role may see on Client & Portfolio (Super Admin / package managers see all). */
+  clientPortfolioVisibility: PortfolioVisibility;
   /** Approver after the leader (e.g. CEO) for the request types listed below; null = no final approval. */
   finalApproverEmployeeId: string | null;
   finalApprovalRequestTypes: string[];
@@ -52,6 +55,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   clientFreezeCountsAsActive: false,
   directoryLeaders: null,
   clientHighlights: ["package", "category", "consultant"],
+  clientPortfolioVisibility: {
+    EMPLOYEE: [],
+    LEADER: ["active", "preparation", "freeze", "inactive", "total", "new", "package", "category", "industry", "subIndustry", "consultant", "adsStrategist", "adAccount"],
+    HR: ["active", "preparation", "freeze", "inactive", "total", "new", "package", "category", "industry", "subIndustry", "consultant", "adsStrategist", "adAccount"],
+  },
   finalApproverEmployeeId: null,
   finalApprovalRequestTypes: [],
   annualLeaveRules: DEFAULT_ANNUAL_RULES,
