@@ -15,13 +15,14 @@ export interface SidebarProps {
   allowed: string[];
   badges: { approvals: number };
   knowledgeHubUrl: string | null;
+  knowledgeHubName: string;
 }
 
 const GROUPS_KEY = "mil.nav.collapsedGroups";
 /** Hidden when the desktop rail is collapsed (data-sidebar=collapsed on the app frame). */
 const railHidden = "lg:group-data-[sidebar=collapsed]/frame:hidden";
 
-export function SidebarNav({ allowed, badges, knowledgeHubUrl, onNavigate, rail = true }: SidebarProps & { onNavigate?: () => void; rail?: boolean }) {
+export function SidebarNav({ allowed, badges, knowledgeHubUrl, knowledgeHubName, onNavigate, rail = true }: SidebarProps & { onNavigate?: () => void; rail?: boolean }) {
   const pathname = usePathname();
   const [closed, setClosed] = useState<string[]>([]);
   const [kbOpen, setKbOpen] = useState(false);
@@ -51,7 +52,8 @@ export function SidebarNav({ allowed, badges, knowledgeHubUrl, onNavigate, rail 
       active ? "bg-brand-700 text-white shadow-[0_6px_16px_rgba(31,55,166,0.25)]" : "text-ink-2 hover:bg-white hover:text-brand-700",
     );
 
-  const render = (n: NavItem) => {
+  const render = (item: NavItem) => {
+    const n = item.id === "knowledge" ? { ...item, label: knowledgeHubName } : item;
     const status = n.feature ? featureStatus(n.feature) : "enabled";
     const Icon = n.icon;
     if (status === "coming_soon") {
@@ -129,7 +131,7 @@ export function SidebarNav({ allowed, badges, knowledgeHubUrl, onNavigate, rail 
       <Dialog
         open={kbOpen}
         onOpenChange={setKbOpen}
-        title="MIL Academy – Knowledge Hub is in development"
+        title={`${knowledgeHubName} is in development`}
         description="MIL Academy, our learning platform, is still being built. The link will appear here as soon as an administrator configures it in Settings → Platform."
         footer={<Button onClick={() => setKbOpen(false)}>Got it</Button>}
       />

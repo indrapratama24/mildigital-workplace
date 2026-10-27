@@ -364,6 +364,7 @@ export async function updatePlatformAction(input: unknown) {
           .nullable()
           .transform((v) => (v ? v : null))
           .refine((v) => !v || /^https:\/\/[^\s]+$/i.test(v), "Use a full https:// URL"),
+        knowledgeHubName: z.string().trim().min(2, "Name must be at least 2 characters").max(60),
       })
       .parse(input);
     await updateSettings(me, p);

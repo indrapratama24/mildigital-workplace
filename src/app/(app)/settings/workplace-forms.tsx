@@ -122,15 +122,19 @@ export function GrantEditor({ userId, name, grants, inherited, options, presets 
 
 // ───────────── Platform ─────────────
 
-export function PlatformForm({ knowledgeHubUrl }: { knowledgeHubUrl: string | null }) {
+export function PlatformForm({ knowledgeHubUrl, knowledgeHubName }: { knowledgeHubUrl: string | null; knowledgeHubName: string }) {
   const [url, setUrl] = useState(knowledgeHubUrl ?? "");
+  const [name, setName] = useState(knowledgeHubName);
   const { pending, run } = useRun();
   return (
     <div className="space-y-3">
-      <Field label="Knowledge Hub (MIL Academy) URL" hint="Opens in a new tab from the sidebar and Home. Leave empty while the platform is in development — employees then see a “Platform in Development” message.">
+      <Field label="Name" hint="Shown everywhere it appears: the sidebar, Home and Settings.">
+        <Input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="MIL Academy – Knowledge Hub" />
+      </Field>
+      <Field label="URL" hint="Opens in a new tab from the sidebar and Home. Leave empty while the platform is in development — employees then see a “Platform in Development” message.">
         <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://academy.mildigital.id" />
       </Field>
-      <Button loading={pending} onClick={() => run(() => W.updatePlatformAction({ knowledgeHubUrl: url || null }))}>Save</Button>
+      <Button loading={pending} disabled={name.trim().length < 2} onClick={() => run(() => W.updatePlatformAction({ knowledgeHubUrl: url || null, knowledgeHubName: name }))}>Save</Button>
     </div>
   );
 }

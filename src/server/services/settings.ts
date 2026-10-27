@@ -16,6 +16,8 @@ export interface AppSettings {
   calendarVisibility: "ALL" | "ASSIGNED";
   /** MIL Academy (Knowledge Hub) URL; null = platform still in development. */
   knowledgeHubUrl: string | null;
+  /** Display name of the Knowledge Hub, used in the sidebar, Home and Settings. */
+  knowledgeHubName: string;
   /** Active clients need a Consultant unless an authorised exception is recorded. */
   clientRequirePrimaryConsultant: boolean;
   /** Counting rule: whether Freeze clients are included in "Active clients". */
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultRequireDelegationFor: [],
   calendarVisibility: "ALL",
   knowledgeHubUrl: null,
+  knowledgeHubName: "MIL Academy – Knowledge Hub",
   clientRequirePrimaryConsultant: true,
   clientFreezeCountsAsActive: false,
   directoryLeaders: null,

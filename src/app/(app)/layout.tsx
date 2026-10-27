@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     cookies(),
   ]);
   const allowed = NAV_ITEMS.filter((n) => !n.any || n.any.some((p) => can(me, p))).map((n) => n.id);
-  const nav = { allowed, badges: { approvals: pendingSteps }, knowledgeHubUrl: settings.knowledgeHubUrl };
+  const nav = { allowed, badges: { approvals: pendingSteps }, knowledgeHubUrl: settings.knowledgeHubUrl, knowledgeHubName: settings.knowledgeHubName };
   const collapsed = jar.get("mil_sidebar")?.value === "collapsed";
   return (
     <div id="app-frame" data-sidebar={collapsed ? "collapsed" : "expanded"} className="group/frame min-h-screen bg-canvas">

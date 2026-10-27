@@ -26,8 +26,8 @@ export default async function PlatformPage() {
   return (
     <div className="space-y-5">
       <Card>
-        <CardHeader title="Knowledge Hub" description="Knowledge Hub is the separate MIL Academy application. Single sign-on is not connected yet — employees sign in to MIL Academy separately." />
-        <CardBody><PlatformForm knowledgeHubUrl={s.knowledgeHubUrl} /></CardBody>
+        <CardHeader title={s.knowledgeHubName} description="The separate learning application, linked from the sidebar and Home. Single sign-on is not connected yet — employees sign in to it separately." />
+        <CardBody><PlatformForm knowledgeHubUrl={s.knowledgeHubUrl} knowledgeHubName={s.knowledgeHubName} /></CardBody>
       </Card>
       <Card>
         <CardHeader title="Modules" description="Availability is defined centrally in src/lib/features.ts and applied to the sidebar, Home and quick actions." />
@@ -37,7 +37,7 @@ export default async function PlatformPage() {
             <tbody>
               {Object.entries(FEATURES).map(([k, v]) => (
                 <tr key={k}>
-                  <td className="text-ink">{LABELS[k] ?? k}</td>
+                  <td className="text-ink">{k === "knowledgeHub" ? s.knowledgeHubName : (LABELS[k] ?? k)}</td>
                   <td><Badge tone={v === "enabled" ? "success" : v === "external" ? "brand" : "neutral"}>{v === "enabled" ? "Enabled" : v === "external" ? (k === "knowledgeHub" && !s.knowledgeHubUrl ? "External · URL not set" : "External link") : "Coming soon"}</Badge></td>
                 </tr>
               ))}
