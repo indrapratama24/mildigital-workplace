@@ -63,7 +63,7 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "growth",
     label: "Development & Growth",
     items: [
-      { id: "knowledge", feature: "knowledgeHub", label: "Knowledge Hub", icon: BookOpenText },
+      { id: "knowledge", feature: "knowledgeHub", label: "MIL Academy – Knowledge Hub", icon: BookOpenText },
       { id: "performance", feature: "performance", label: "Performance & Growth", icon: TrendingUp },
       { id: "collaboration", feature: "collaboration", label: "Collaboration Hub", icon: Handshake },
     ],

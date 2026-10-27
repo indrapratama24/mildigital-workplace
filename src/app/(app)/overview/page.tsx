@@ -275,12 +275,12 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
             {settings.knowledgeHubUrl ? (
               <a href={settings.knowledgeHubUrl} target="_blank" rel="noopener noreferrer" className="flex flex-col gap-2 rounded-2xl border border-line-2 p-3 text-[13px] font-medium text-ink hover:border-brand-200 hover:bg-brand-50/40">
                 <BookOpenText className="h-5 w-5 text-brand-600" />
-                <span className="inline-flex items-center gap-1">Knowledge Hub <ExternalLink className="h-3 w-3 text-subtle" /></span>
+                <span className="inline-flex items-center gap-1">MIL Academy – Knowledge Hub <ExternalLink className="h-3 w-3 text-subtle" /></span>
               </a>
             ) : (
               <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-line p-3 text-[13px] font-medium text-subtle" title="MIL Academy is in development">
                 <BookOpenText className="h-5 w-5" />
-                <span>Knowledge Hub<span className="block text-[11px] font-normal">Platform in development</span></span>
+                <span>MIL Academy – Knowledge Hub<span className="block text-[11px] font-normal">Platform in development</span></span>
               </div>
             )}
           </CardBody>

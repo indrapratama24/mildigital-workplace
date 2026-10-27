@@ -67,7 +67,7 @@ export function SidebarNav({ allowed, badges, knowledgeHubUrl, onNavigate, rail 
       const content = (
         <>
           <Icon className="h-[18px] w-[18px] shrink-0 text-subtle group-hover:text-brand-600" aria-hidden />
-          <span className={cn("flex-1 truncate text-left", hide)}>{n.label}</span>
+          <span className={cn("line-clamp-2 flex-1 text-balance text-left leading-snug", hide)}>{n.label}</span>
           <ExternalLink className={cn("h-3.5 w-3.5 text-subtle", hide)} aria-hidden />
         </>
       );
@@ -129,7 +129,7 @@ export function SidebarNav({ allowed, badges, knowledgeHubUrl, onNavigate, rail 
       <Dialog
         open={kbOpen}
         onOpenChange={setKbOpen}
-        title="Knowledge Hub — platform in development"
+        title="MIL Academy – Knowledge Hub is in development"
         description="MIL Academy, our learning platform, is still being built. The link will appear here as soon as an administrator configures it in Settings → Platform."
         footer={<Button onClick={() => setKbOpen(false)}>Got it</Button>}
       />
