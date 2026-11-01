@@ -80,13 +80,6 @@ const NAV: [string, string][] = [
 
 const LOCATION: Record<string, string> = { IN_OFFICE: "In office", ONLINE: "Online", HYBRID: "Hybrid", EXTERNAL: "External" };
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]!.toUpperCase())
-    .join("");
 
 type WeekDay = { dow: string; label: string; tone: "wfo" | "wfh" | "leave" | "off" };
 interface Preview {
@@ -176,10 +169,9 @@ const BtnIcon = () => (
 
 export default async function HomePage() {
   const user = await getCurrentUser();
-  const [activeCount, teamCount, people, preview] = await Promise.all([
+  const [activeCount, teamCount, preview] = await Promise.all([
     db.employee.count({ where: { isActive: true } }),
     db.team.count({ where: { isActive: true } }),
-    db.employee.findMany({ where: { isActive: true }, select: { fullName: true }, take: 4, orderBy: { startDate: "asc" } }),
     user ? livePreview(user).catch(() => ILLUSTRATIVE) : Promise.resolve(ILLUSTRATIVE),
   ]);
   const cta = user ? { href: "/overview", short: "Open WORKPLACE", long: "Open WORKPLACE" } : { href: "/login", short: "Sign in", long: "Sign in to WORKPLACE" };
@@ -258,13 +250,13 @@ export default async function HomePage() {
               </div>
               <div className="hero-proof">
                 <div className="proof-avatars" aria-hidden>
-                  {people.map((p) => (
-                    <span key={p.fullName}>{initials(p.fullName)}</span>
-                  ))}
+                  <span><I icon={Contact} className="proof-icon" /></span>
+                  <span><I icon={Briefcase} className="proof-icon" /></span>
+                  <span><I icon={Building2} className="proof-icon" /></span>
                 </div>
                 <div className="od-stat">
-                  <span className="proof-strong od-nowrap">{activeCount} teammates</span>
-                  <span className="proof-sub">{teamCount} teams, one MIL Digital</span>
+                  <span className="proof-strong">Everything about MIL Digital, in one place</span>
+                  <span className="proof-sub">Teams, clients, company info and daily work — always up to date.</span>
                 </div>
               </div>
             </div>
