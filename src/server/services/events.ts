@@ -8,7 +8,7 @@ import type {
   InternalEvent,
   Prisma,
   RecurrenceFreq,
-} from "@prisma/client";
+} from "@/generated/prisma/client";
 import { db, withTx, type DbOrTx, type Tx } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { badState, conflict, forbidden, invalid, notFound } from "../errors";
@@ -38,7 +38,7 @@ import { getHolidays } from "./calendar";
 import { getSettings } from "./settings";
 import { isHolidayEffective } from "@/lib/engine/working-days";
 import { isoWeekday } from "@/lib/dates";
-import type { ApprovalWorkflow } from "@prisma/client";
+import type { ApprovalWorkflow } from "@/generated/prisma/client";
 
 // ───────────────────────────── Input & validation ─────────────────────────────
 

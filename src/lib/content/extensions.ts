@@ -1,19 +1,12 @@
 // TipTap schema shared by the editor (browser) and the HTML renderer (server). No React here.
 import { Node, mergeAttributes, type Extensions } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
-import Underline from "@tiptap/extension-underline";
-import Link from "@tiptap/extension-link";
-import Image from "@tiptap/extension-image";
-import Table from "@tiptap/extension-table";
-import TableRow from "@tiptap/extension-table-row";
-import TableCell from "@tiptap/extension-table-cell";
-import TableHeader from "@tiptap/extension-table-header";
-import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
-import TextAlign from "@tiptap/extension-text-align";
-import Highlight from "@tiptap/extension-highlight";
-import TextStyle from "@tiptap/extension-text-style";
-import Color from "@tiptap/extension-color";
+import { StarterKit } from "@tiptap/starter-kit";
+import { Image } from "@tiptap/extension-image";
+import { Table, TableRow, TableCell, TableHeader } from "@tiptap/extension-table";
+import { TaskList, TaskItem } from "@tiptap/extension-list";
+import { TextAlign } from "@tiptap/extension-text-align";
+import { Highlight } from "@tiptap/extension-highlight";
+import { TextStyle, Color } from "@tiptap/extension-text-style";
 import { isSafeHref, toEmbed } from "./format";
 
 export const CALLOUT_TONES = {
@@ -207,9 +200,12 @@ export const Columns = Node.create({
 
 export function contentExtensions(): Extensions {
   return [
-    StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
-    Underline,
-    Link.configure({ openOnClick: false, autolink: true, protocols: ["mailto", "tel"], HTMLAttributes: { target: "_blank", rel: "noopener noreferrer" }, validate: (href) => isSafeHref(href) }),
+    // StarterKit v3 bundles Link and Underline; the trailing empty paragraph is off so opening a doc doesn't change it.
+    StarterKit.configure({
+      heading: { levels: [1, 2, 3] },
+      link: { openOnClick: false, autolink: true, protocols: ["mailto", "tel"], HTMLAttributes: { target: "_blank", rel: "noopener noreferrer" }, isAllowedUri: (url) => isSafeHref(url) },
+      trailingNode: false,
+    }),
     Image.configure({ inline: false, allowBase64: false }),
     Table.configure({ resizable: false }),
     TableRow,

@@ -1,4 +1,4 @@
-import type { StepKind } from "@prisma/client";
+import type { StepKind } from "@/generated/prisma/client";
 // Decision entry point: every approval/delegation decision runs in ONE serializable transaction
 // that records the immutable action, advances the workflow and applies the subject's effects.
 import { db, withTx } from "../db";

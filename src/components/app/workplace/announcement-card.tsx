@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Paperclip } from "lucide-react";
-import type { AnnouncementPriority } from "@prisma/client";
+import type { AnnouncementPriority } from "@/generated/prisma/client";
 import { formatDateTime } from "@/lib/dates";
 import { docToText } from "@/lib/content/format";
 import { Badge } from "@/components/ui/badge";

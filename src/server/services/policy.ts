@@ -1,4 +1,4 @@
-import type { EvaluationPeriod, PolicyVersion, RoundingMode } from "@prisma/client";
+import type { EvaluationPeriod, PolicyVersion, RoundingMode } from "@/generated/prisma/client";
 import { db, withTx, type DbOrTx } from "../db";
 import { addDays, fromISO, monthStart, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { validatePolicyRules, type PolicyRules } from "@/lib/engine/working-days";

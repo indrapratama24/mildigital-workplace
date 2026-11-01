@@ -3,7 +3,7 @@
 import { accruedEntitlement, checkTiers, concurrencyCap, offStretch, unpaidDays } from "@/lib/engine/leave";
 import { isHolidayEffective } from "@/lib/engine/working-days";
 import { rulesForLevel } from "@/lib/engine/request-rules";
-import type { ApprovalStep, ApprovalWorkflow, DurationType, Prisma, Request, RequestStatus } from "@prisma/client";
+import type { ApprovalStep, ApprovalWorkflow, DurationType, Prisma, Request, RequestStatus } from "@/generated/prisma/client";
 import { db, withTx, type DbOrTx, type Tx } from "../db";
 import { addDays as addDaysISO, addMonths, eachDate, formatDate, formatDateRange, fromISO, isoWeekday as isoWeekdayOf, isValidISO, monthEnd, monthStart, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { evaluatePlan, type LeaveDay } from "@/lib/engine/working-days";

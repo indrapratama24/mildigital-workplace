@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/generated/prisma/client";
 import { db } from "../db";
 
 export const SESSION_COOKIE = "mil_session";

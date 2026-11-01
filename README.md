@@ -75,7 +75,7 @@ The seed creates its workflow data **through the real services** (plans submitte
 | `npm run dev` | Dev server on :3000 |
 | `npm run build` / `npm start` | Production build / server |
 | `npm run db:local` | Local PostgreSQL on :5433 (creates `mil_hybrid` and `mil_hybrid_test`) |
-| `npm run db:migrate` | `prisma migrate dev` (create new migrations) |
+| `npm run db:migrate` | `prisma migrate dev` + `prisma generate` (create new migrations; Prisma 7 no longer generates on its own) |
 | `npm run db:deploy` | Apply migrations (production) |
 | `npm run db:seed` | **Wipes** and reseeds the database in `DATABASE_URL` |
 | `npm test` | Unit + integration tests |

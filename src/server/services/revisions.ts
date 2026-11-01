@@ -1,6 +1,6 @@
 // Mid-month schedule revisions. Approved schedules are never overwritten directly: changes are
 // proposed per date, evaluated against the policy, and applied only to the affected dates on approval.
-import type { ApprovalWorkflow, Prisma, RevisionKind } from "@prisma/client";
+import type { ApprovalWorkflow, Prisma, RevisionKind } from "@/generated/prisma/client";
 import { db, withTx, type Tx } from "../db";
 import { formatDate, formatMonth, fromISO, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { computeRevisionImpact, evaluatePlan, type ChangeInput, type ModeMap, type WorkModeT } from "@/lib/engine/working-days";

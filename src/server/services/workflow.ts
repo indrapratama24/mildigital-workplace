@@ -1,6 +1,6 @@
 // Generic sequential approval workflow (peer delegate → leader → optional HR).
 // Subject-specific effects (schedule, revision, request) are applied by approvals.ts in the same transaction.
-import type { ApprovalStep, ApprovalWorkflow, StepKind, WorkflowSubject } from "@prisma/client";
+import type { ApprovalStep, ApprovalWorkflow, StepKind, WorkflowSubject } from "@/generated/prisma/client";
 import type { Tx } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { can } from "../authz";

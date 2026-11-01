@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Download, FileBarChart, X } from "lucide-react";
-import type { RequestCategory } from "@prisma/client";
+import type { RequestCategory } from "@/generated/prisma/client";
 import { db } from "@/server/db";
 import { requirePageUser } from "@/server/auth/guard";
 import { can } from "@/server/authz";

@@ -1,7 +1,7 @@
 // Leave & permission report: request history plus totals by type, team, person and month for HR,
 // Super Admin (whole company) and leaders (their direct reports). Drafts are never included.
 // A request belongs to the period in which it starts; days and hours count approved requests only.
-import type { Prisma, RequestCategory, RequestStatus } from "@prisma/client";
+import type { Prisma, RequestCategory, RequestStatus } from "@/generated/prisma/client";
 import { db } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { can } from "../authz";

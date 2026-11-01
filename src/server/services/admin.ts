@@ -1,5 +1,5 @@
 // Administration: holidays, request types, departments/teams, levels, leave balances.
-import type { HolidayType, Prisma, Requirement, RequestCategory, EmploymentStatus } from "@prisma/client";
+import type { HolidayType, Prisma, Requirement, RequestCategory, EmploymentStatus } from "@/generated/prisma/client";
 import { db, withTx, type Tx } from "../db";
 import { OVERRIDE_KEYS, parseLevelExceptions, type LevelException } from "@/lib/engine/request-rules";
 import { fromISO, isValidISO, todayJakarta } from "@/lib/dates";

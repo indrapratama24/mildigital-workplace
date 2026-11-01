@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table } from "@/components/ui/misc";
 import { Input } from "@/components/ui/field";
 import { buttonClass } from "@/components/ui/button";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/generated/prisma/client";
 
 export default async function SecurityPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
   await requirePagePermission("audit.view");

@@ -4,7 +4,8 @@
 // notification and audit entry is genuine).
 //
 // Demo password for every account: MilDigital2026!  (local development only)
-import { PrismaClient, type Role } from "@prisma/client";
+import type { Role } from "../src/generated/prisma/client";
+import { createDbClient } from "../src/server/db";
 import { createReferenceData } from "./reference";
 import { randomUUID } from "node:crypto";
 import { hashPassword } from "../src/server/auth/password";
@@ -21,7 +22,7 @@ import { updatePersonalData } from "../src/server/services/people";
 import { changeClientStatus, createClient } from "../src/server/services/clients";
 import { createRegulation, publishRegulation, saveAnnouncement, saveRecognition, saveSection } from "../src/server/services/workplace";
 
-const db = new PrismaClient();
+const db = createDbClient();
 export const DEMO_PASSWORD = "MilDigital2026!";
 
 const d = (s: string) => fromISO(s);

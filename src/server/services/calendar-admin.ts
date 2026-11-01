@@ -1,5 +1,5 @@
 // Internal Calendar administration: permission grants (Team Settings), categories and visibility.
-import type { CalendarRole, CalendarScope, Role } from "@prisma/client";
+import type { CalendarRole, CalendarScope, Role } from "@/generated/prisma/client";
 import { db, withTx } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { conflict, forbidden, invalid, notFound } from "../errors";

@@ -1,4 +1,4 @@
-import type { EmploymentStatus, Prisma, RelationshipType, Role } from "@prisma/client";
+import type { EmploymentStatus, Prisma, RelationshipType, Role } from "@/generated/prisma/client";
 import { db, withTx, type DbOrTx } from "../db";
 import { addDays, fromISO, isValidISO, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { APPROVER_ROLES, can, hasCompanyScope } from "../authz";

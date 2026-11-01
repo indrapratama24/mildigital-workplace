@@ -1,6 +1,6 @@
 // Lightweight attendance verification: manual self clock-in (no location tracking), leader/HR
 // verification, and HR corrections with a mandatory reason and an immutable correction trail.
-import type { VerificationStatus, WorkMode } from "@prisma/client";
+import type { VerificationStatus, WorkMode } from "@/generated/prisma/client";
 import { db, withTx } from "../db";
 import { formatDate, fromISO, isoWeekday, isValidISO, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import type { CurrentUser } from "../auth/session";

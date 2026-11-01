@@ -1,4 +1,4 @@
-import type { ApprovalWorkflow, Prisma, WorkMode } from "@prisma/client";
+import type { ApprovalWorkflow, Prisma, WorkMode } from "@/generated/prisma/client";
 import { db, withTx, type Tx } from "../db";
 import { addDays, currentMonthJakarta, formatDate, formatMonth, fromISO, monthEnd, monthStart, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { evaluateAttendance, evaluatePlan, generatePlan, type ModeMap, type WorkModeT } from "@/lib/engine/working-days";

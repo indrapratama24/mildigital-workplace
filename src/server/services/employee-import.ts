@@ -1,7 +1,7 @@
 // CSV import / export for the Team Directory — same flow as the client import: download the template
 // (= export columns), check every row, then import. Rows with a known employee_id update that person;
 // other rows create employees. Empty cells on existing people leave their current value unchanged.
-import type { EmploymentStatus } from "@prisma/client";
+import type { EmploymentStatus } from "@/generated/prisma/client";
 import { db } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { can } from "../authz";

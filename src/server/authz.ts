@@ -1,6 +1,6 @@
 // Role-based access control. Roles are permission sets; they are independent from employee level.
 // Data scope is enforced separately (see services/org.ts → visibleEmployeeIds).
-import type { Role } from "@prisma/client";
+import type { Role } from "@/generated/prisma/client";
 
 export const PERMISSIONS = {
   "self.use": "Plan own schedule, submit requests, clock in",

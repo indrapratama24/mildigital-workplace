@@ -1,7 +1,7 @@
 // Bulk edit (spreadsheet style) for the Team Directory and the Client directory: each selected row carries
 // its own new values. Every row goes through the same service as a single edit (same rules, history and
 // audit log); failures are reported per row and don't stop the others.
-import type { EmploymentStatus } from "@prisma/client";
+import type { EmploymentStatus } from "@/generated/prisma/client";
 import { db, withTx } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { can } from "../authz";

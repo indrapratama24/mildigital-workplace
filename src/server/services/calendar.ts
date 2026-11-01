@@ -1,6 +1,6 @@
 // Loads everything the engine needs for an employee-month and returns the computed requirement,
 // plans, overlays and attendance. Used by the planner, approvals, requests and compliance reports.
-import type { AttendanceException, AttendanceRecord, MonthlySchedule, Request, RequestType, ScheduleDay, ScheduleRevision, ScheduleRevisionItem } from "@prisma/client";
+import type { AttendanceException, AttendanceRecord, MonthlySchedule, Request, RequestType, ScheduleDay, ScheduleRevision, ScheduleRevisionItem } from "@/generated/prisma/client";
 import { db, type DbOrTx } from "../db";
 import { eachDate, fromISO, isoWeekday, monthEnd, monthStart, toISO, type ISODate } from "@/lib/dates";
 import { computeRequirement, isHolidayEffective, type HolidayInput, type LeaveDay, type ModeMap, type MonthRequirement } from "@/lib/engine/working-days";

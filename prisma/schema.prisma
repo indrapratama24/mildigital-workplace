@@ -3,14 +3,13 @@
 // Timestamps (createdAt, clockInAt, ...) are stored in UTC.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
+// Connection URLs live in prisma.config.ts (CLI) and src/server/db.ts (app).
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  /// Direct (non-pooled) connection for migrations; same as DATABASE_URL locally.
-  directUrl = env("DATABASE_URL_UNPOOLED")
+  provider = "postgresql"
 }
 
 // ───────────────────────────── Enums ─────────────────────────────

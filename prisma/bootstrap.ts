@@ -3,13 +3,13 @@
 //   1. loads reference configuration (level policies, request types, holidays, default teams)
 //   2. creates the first Super Admin with a password typed interactively (never stored in code or logs)
 // Usage:  npm run db:bootstrap   (uses DATABASE_URL from the environment / .env.production.local)
-import { PrismaClient } from "@prisma/client";
+import { createDbClient } from "../src/server/db";
 import readline from "node:readline";
 import { hashPassword, passwordPolicyError } from "../src/server/auth/password";
 import { fromISO, todayJakarta } from "../src/lib/dates";
 import { createReferenceData } from "./reference";
 
-const db = new PrismaClient();
+const db = createDbClient();
 
 // One shared readline interface (works for interactive terminals and piped input).
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY });

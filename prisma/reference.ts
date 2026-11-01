@@ -1,6 +1,6 @@
 // Reference configuration shared by the demo seed and the production bootstrap:
 // level policies, levels, departments/teams, the holiday calendar and request types.
-import type { HolidayType, PrismaClient, Requirement, RequestCategory } from "@prisma/client";
+import type { HolidayType, PrismaClient, Requirement, RequestCategory } from "../src/generated/prisma/client";
 import { fromISO } from "../src/lib/dates";
 
 const d = (s: string) => fromISO(s);

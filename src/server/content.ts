@@ -1,6 +1,8 @@
 // Server-side guard for rich content: only known nodes/marks with validated attributes are stored,
 // so rendered HTML can never contain scripts, unknown iframes or unsafe links.
-import { generateHTML } from "@tiptap/html";
+import { getSchema } from "@tiptap/core";
+import { Node as PMNode } from "@tiptap/pm/model";
+import { renderToHTMLString } from "@tiptap/static-renderer/pm/html-string";
 import { contentExtensions, CALLOUT_TONES } from "@/lib/content/extensions";
 import { isDocJson, isSafeHref, isSafeImageSrc, parseDoc, toEmbed, type JSONNode } from "@/lib/content/format";
 import { invalid } from "./errors";
@@ -90,7 +92,7 @@ export function sanitizeContent(body: string): string {
   const cleaned = clean(doc) ?? { type: "doc", content: [] };
   // Validate against the real schema (e.g. table/column structure).
   try {
-    generateHTML(cleaned as never, contentExtensions());
+    PMNode.fromJSON(getSchema(contentExtensions()), cleaned);
   } catch {
     throw invalid("The content has an invalid structure.");
   }
@@ -108,5 +110,6 @@ export function isEmptyContent(body: string) {
 /** HTML for stored rich content (already sanitised on save; sanitised again defensively). */
 export function renderContentHtml(body: string): string {
   const doc = parseDoc(sanitizeContent(body));
-  return doc ? generateHTML(doc as never, contentExtensions()) : "";
+  // String renderer: no DOM emulation on the server, output escaped by TipTap.
+  return doc ? renderToHTMLString({ content: doc as never, extensions: contentExtensions() }) : "";
 }

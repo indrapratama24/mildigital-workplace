@@ -1,7 +1,7 @@
 // Internal Calendar authorization. Calendar roles are separate from application roles:
 // being a participant or a team leader never grants edit rights — only explicit grants do
 // (or Super Admin). All checks run server-side.
-import type { CalendarRole, CalendarScope, EventAssignmentType } from "@prisma/client";
+import type { CalendarRole, CalendarScope, EventAssignmentType } from "@/generated/prisma/client";
 import { db, type DbOrTx } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { can, hasCompanyScope } from "../authz";

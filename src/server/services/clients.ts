@@ -1,7 +1,7 @@
 // Client & Portfolio. The brand (ClientBrand) is the directory record; its `clientCode` is the
 // user-facing Client ID. Status, engagement, package and team are effective-dated so monthly
 // counts stay correct after later changes.
-import type { ClientRole, ClientStatus, Prisma } from "@prisma/client";
+import type { ClientRole, ClientStatus, Prisma } from "@/generated/prisma/client";
 import { db, withTx, type DbOrTx, type Tx } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { can } from "../authz";

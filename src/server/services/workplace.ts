@@ -1,6 +1,6 @@
 // Company Hub: Company 101 content, regulations (versioned, publishable, acknowledgeable),
 // targeted announcements and recognition. Employee data is always read from the directory.
-import type { AnnouncementPriority, AudienceType, ContentStatus, Prisma, RecognitionKind } from "@prisma/client";
+import type { AnnouncementPriority, AudienceType, ContentStatus, Prisma, RecognitionKind } from "@/generated/prisma/client";
 import { randomUUID } from "node:crypto";
 import { db, withTx, type DbOrTx } from "../db";
 import type { CurrentUser } from "../auth/session";

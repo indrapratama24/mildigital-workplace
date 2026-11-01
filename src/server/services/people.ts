@@ -2,7 +2,7 @@
 // Every field shown to a viewer passes through `canSeeField` on the server — the UI never receives data
 // it isn't allowed to display. Identity and bank numbers are encrypted and masked; full values are only
 // returned by `revealSensitive`, which is audit-logged.
-import type { MaritalStatus } from "@prisma/client";
+import type { MaritalStatus } from "@/generated/prisma/client";
 import { db, withTx } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { can } from "../authz";

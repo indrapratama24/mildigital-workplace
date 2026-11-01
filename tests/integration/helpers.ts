@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/generated/prisma/client";
 import { db } from "@/server/db";
 import type { CurrentUser } from "@/server/auth/session";
 import { fromISO } from "@/lib/dates";

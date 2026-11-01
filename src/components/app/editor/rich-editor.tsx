@@ -3,7 +3,7 @@
 // images, files, embeds, link cards, dates and @mentions. Output is TipTap JSON (sanitised on the server).
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
-import Placeholder from "@tiptap/extension-placeholder";
+import { Placeholder } from "@tiptap/extensions";
 import * as DM from "@radix-ui/react-dropdown-menu";
 import { toast } from "sonner";
 import {
