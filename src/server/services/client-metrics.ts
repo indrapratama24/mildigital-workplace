@@ -5,11 +5,14 @@ import { db } from "../db";
 import { addMonths, fromISO, monthEnd, monthStart, todayJakarta, toISO, type ISODate } from "@/lib/dates";
 import { isNewIn, type ClientStatusT } from "@/lib/engine/clients";
 import { getSettings, type AppSettings } from "./settings";
+import { applyScheduledInactive } from "./clients";
 import type { CurrentUser } from "../auth/session";
 import { can } from "../authz";
 import type { VisibilityRole } from "@/lib/portfolio-visibility";
 
 async function brandsWithHistory() {
+  // Planned Date OFFs that have passed become Inactive before anything is counted.
+  await applyScheduledInactive();
   return db.clientBrand.findMany({
     where: { archivedAt: null },
     select: {

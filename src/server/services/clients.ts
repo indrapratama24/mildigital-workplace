@@ -359,7 +359,8 @@ export async function updateClient(actor: CurrentUser, id: string, input: Update
     await lockBrand(tx, id);
     const before = await tx.clientBrand.findUnique({ where: { id } });
     if (!before || before.archivedAt) throw notFound("Client");
-    const nextStatus = input.status?.status ?? before.status;
+    const scheduled = !!input.status && input.status.status !== before.status && isScheduledOff(input.status);
+    const nextStatus = scheduled ? before.status : (input.status?.status ?? before.status);
     const errs = validateTeam(input.team, { status: nextStatus, requirePrimary: settings.clientRequirePrimaryConsultant, waived });
     if (errs.length) throw invalid(errs.join(" "));
     const canSensitive = await canSeeClientSensitive(actor, id, tx);
@@ -391,7 +392,8 @@ export async function updateClient(actor: CurrentUser, id: string, input: Update
       },
     });
 
-    if (input.status && input.status.status !== before.status) await applyStatusChange(tx, actor, brand.id, input.status, input.packageId);
+    if (scheduled) await scheduleInactive(tx, actor, brand.id, input.status!);
+    else if (input.status && input.status.status !== before.status) await applyStatusChange(tx, actor, brand.id, input.status, input.packageId);
     await changePackage(tx, actor, id, input.packageId, today);
     await syncAdAccounts(tx, id, input.adAccounts);
     // Clients in preparation: the team starts with the collaboration (Date START).
@@ -462,6 +464,7 @@ export async function changeClientStatus(actor: CurrentUser, id: string, input: 
     const before = await tx.clientBrand.findUnique({ where: { id } });
     if (!before || before.archivedAt) throw notFound("Client");
     if (input.status === before.status) throw invalid(`The client is already ${input.status.toLowerCase()}.`);
+    if (isScheduledOff(input)) return scheduleInactive(tx, actor, id, input);
     if (input.status === "ACTIVE") {
       const settings = await getSettings(tx);
       const primary = await tx.clientTeamAssignment.count({ where: { brandId: id, role: "CONSULTANT_PRIMARY", effectiveTo: null } });
@@ -474,11 +477,68 @@ export async function changeClientStatus(actor: CurrentUser, id: string, input: 
   });
 }
 
+/** Inactive with a Date OFF of today or later: planned ahead, applied the day after Date OFF. */
+const isScheduledOff = (input: StatusChangeInput) => input.status === "INACTIVE" && !!clean(input.dateOff) && clean(input.dateOff)! >= todayJakarta();
+
+/**
+ * Plans the end of the collaboration: the client keeps its status (and stays in the counts) through Date OFF
+ * and becomes Inactive automatically the day after. Planning again replaces the date.
+ */
+async function scheduleInactive(tx: Tx, actor: CurrentUser, brandId: string, input: StatusChangeInput) {
+  const brand = await tx.clientBrand.findUniqueOrThrow({ where: { id: brandId } });
+  const open = await tx.clientStatusHistory.findFirst({ where: { brandId, effectiveTo: null } });
+  const dateOff = clean(input.dateOff)!;
+  if (!isValidISO(dateOff)) throw invalid("Date OFF is invalid.");
+  if (dateOff < toISO(brand.dateStart)) throw invalid("Date OFF can't be earlier than Date START.");
+  if (open && dateOff < toISO(open.effectiveFrom)) throw invalid(`Date OFF can't be before the current ${open.status.toLowerCase()} period started (${toISO(open.effectiveFrom)}).`);
+  const after = await tx.clientBrand.update({ where: { id: brandId }, data: { scheduledDateOff: fromISO(dateOff), scheduledOffReason: clean(input.reason), scheduledOffById: actor.employeeId } });
+  await audit(tx, { actorUserId: actor.userId, action: "client.status.schedule", entityType: "ClientBrand", entityId: brandId, before: { scheduledDateOff: brand.scheduledDateOff }, after: { scheduledDateOff: dateOff }, metadata: input });
+  return after;
+}
+
+/** Cancels a planned Date OFF; the client simply keeps its current status. */
+export async function cancelScheduledInactive(actor: CurrentUser, id: string) {
+  if (!canManageClients(actor)) throw forbidden();
+  return withTx(async (tx) => {
+    await lockBrand(tx, id);
+    const b = await tx.clientBrand.findUnique({ where: { id } });
+    if (!b || b.archivedAt) throw notFound("Client");
+    if (!b.scheduledDateOff) throw conflict("No Date OFF is planned for this client.");
+    await tx.clientBrand.update({ where: { id }, data: { scheduledDateOff: null, scheduledOffReason: null, scheduledOffById: null } });
+    await audit(tx, { actorUserId: actor.userId, action: "client.status.unschedule", entityType: "ClientBrand", entityId: id, before: { scheduledDateOff: toISO(b.scheduledDateOff) } });
+  });
+}
+
+/**
+ * Applies planned Date OFFs that have passed: the client becomes Inactive from the day after Date OFF, exactly as if
+ * it had been set then (history, engagement and package end on Date OFF). Run by the daily job and before client
+ * pages and reports read statuses, so nothing waits for the job.
+ */
+export async function applyScheduledInactive(now = new Date()) {
+  const today = todayJakarta(now);
+  const due = await db.clientBrand.findMany({ where: { scheduledDateOff: { lt: fromISO(today) }, archivedAt: null }, select: { id: true } });
+  let applied = 0;
+  for (const { id } of due)
+    await withTx(async (tx) => {
+      await lockBrand(tx, id);
+      const b = await tx.clientBrand.findUniqueOrThrow({ where: { id } });
+      if (!b.scheduledDateOff || toISO(b.scheduledDateOff) >= today) return;
+      const dateOff = toISO(b.scheduledDateOff);
+      if (b.status !== "INACTIVE") {
+        await applyStatusChange(tx, { employeeId: b.scheduledOffById }, id, { status: "INACTIVE", dateOff, reason: b.scheduledOffReason }, null);
+        applied++;
+      }
+      await tx.clientBrand.update({ where: { id }, data: { scheduledDateOff: null, scheduledOffReason: null, scheduledOffById: null } });
+      await audit(tx, { actorUserId: null, action: "client.status.scheduled_apply", entityType: "ClientBrand", entityId: id, after: { status: "INACTIVE", dateOff } });
+    });
+  return applied;
+}
+
 /**
  * Closes the open status period and opens the new one. Inactive closes the engagement (Date OFF);
  * reactivation opens a new engagement and keeps the original Date START.
  */
-async function applyStatusChange(tx: Tx, actor: CurrentUser, brandId: string, input: StatusChangeInput, packageId: string | null) {
+async function applyStatusChange(tx: Tx, actor: { employeeId: string | null }, brandId: string, input: StatusChangeInput, packageId: string | null) {
   const today = todayJakarta();
   const brand = await tx.clientBrand.findUniqueOrThrow({ where: { id: brandId } });
   const open = await tx.clientStatusHistory.findFirst({ where: { brandId, effectiveTo: null } });
@@ -520,7 +580,8 @@ async function applyStatusChange(tx: Tx, actor: CurrentUser, brandId: string, in
     const created = await tx.clientEngagement.create({ data: { brandId, startDate: fromISO(from) } });
     await tx.clientEngagementPackage.create({ data: { engagementId: created.id, packageId: pkgId, effectiveFrom: fromISO(from), changedById: actor.employeeId } });
   }
-  await tx.clientBrand.update({ where: { id: brandId }, data: { status: input.status, dateOff: input.status === "INACTIVE" ? fromISO(dateOff!) : null } });
+  // A status change made now replaces any planned Date OFF.
+  await tx.clientBrand.update({ where: { id: brandId }, data: { status: input.status, dateOff: input.status === "INACTIVE" ? fromISO(dateOff!) : null, scheduledDateOff: null, scheduledOffReason: null, scheduledOffById: null } });
 }
 
 /** Soft-delete for records created by mistake. They disappear from directory and counts; history is kept. */
@@ -579,6 +640,8 @@ function shape(b: BrandWithTeam, today: ISODate) {
     displayStatus: displayStatus(b.status, dateStart, today),
     dateStart,
     dateOff,
+    /** Planned Date OFF: still counted as now, Inactive from the day after. */
+    scheduledDateOff: b.scheduledDateOff ? toISO(b.scheduledDateOff) : null,
     category: b.category?.name ?? null,
     categoryId: b.category?.id ?? null,
     industry: b.industry?.name ?? null,
@@ -610,6 +673,7 @@ export interface ClientFilters {
 }
 
 export async function listClients(_viewer: CurrentUser, f: ClientFilters = {}) {
+  await applyScheduledInactive();
   const today = todayJakarta();
   const q = f.q?.trim();
   const brands = await db.clientBrand.findMany({
@@ -669,6 +733,7 @@ export async function clientFilterOptions() {
 }
 
 export async function getClient(viewer: CurrentUser, id: string) {
+  await applyScheduledInactive();
   const today = todayJakarta();
   const b = await db.clientBrand.findUnique({
     where: { id },
@@ -729,6 +794,7 @@ export type ClientDetail = Awaited<ReturnType<typeof getClient>>;
 
 /** Clients an employee is currently assigned to (same assignment records as the client page). */
 export async function clientsForEmployee(employeeId: string) {
+  await applyScheduledInactive();
   const rows = await db.clientTeamAssignment.findMany({
     where: { employeeId, effectiveTo: null, brand: { archivedAt: null } },
     include: { brand: { select: { id: true, name: true, clientCode: true, status: true, dateStart: true } } },

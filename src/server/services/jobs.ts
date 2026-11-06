@@ -11,6 +11,7 @@ import { attendanceInputs, autoApproveMetPlan, prefillDefaultPlan } from "./sche
 import { escalateOverdue } from "./approvals";
 import { refreshDynamicParticipants, sendDueReminders, sweepEventsOnOffDays } from "./events";
 import { freezePastDays } from "./office";
+import { applyScheduledInactive } from "./clients";
 
 export async function runDailyJobs(now = new Date()) {
   const today = todayJakarta(now);
@@ -78,11 +79,13 @@ export async function runDailyJobs(now = new Date()) {
     if (dayOfMonth === 1) for (const id of ids) if ((await autoApproveMetPlan(id, cur.year, cur.month)) === "approved") autoApproved.push(id);
   }
 
+  // Clients whose planned Date OFF has passed become Inactive
+  const clientsInactivated = await applyScheduledInactive(now);
   // 4. Escalate overdue approvals
   const escalation = await escalateOverdue(now);
   // 5. Internal Calendar: dynamic participant groups and due event reminders
   const offDays = await sweepEventsOnOffDays(db);
   const dynamic = await refreshDynamicParticipants();
   const eventReminders = await sendDueReminders(now);
-  return { today, reminders, shortfalls, plansPrefilled: prefilled, plansAutoApproved: autoApproved.length, officeDaysFrozen: daysFrozen, ...escalation, dynamicParticipantsAdded: dynamic.added, eventsCancelledOnOffDays: offDays.cancelled, eventReminders: eventReminders.sent };
+  return { today, reminders, shortfalls, plansPrefilled: prefilled, plansAutoApproved: autoApproved.length, officeDaysFrozen: daysFrozen, clientsInactivated, ...escalation, dynamicParticipantsAdded: dynamic.added, eventsCancelledOnOffDays: offDays.cancelled, eventReminders: eventReminders.sent };
 }

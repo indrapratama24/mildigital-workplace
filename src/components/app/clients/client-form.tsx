@@ -215,8 +215,13 @@ export function ClientForm({
             <Input type="date" value={f.dateStart} onChange={(e) => set("dateStart", e.target.value)} max={f.status === "ACTIVE" ? undefined : today} />
           </Field>
           {f.status === "INACTIVE" && (mode === "create" || statusChanged || initial.status === "INACTIVE") ? (
-            <Field label="Date OFF" required hint="Last day of collaboration">
-              <Input type="date" value={f.dateOff} onChange={(e) => set("dateOff", e.target.value)} min={f.dateStart || undefined} max={today} disabled={mode === "edit" && !statusChanged} />
+            <Field
+              label="Date OFF"
+              required
+              hint={mode === "edit" && statusChanged && f.dateOff >= today ? `Planned: stays ${initial.status === "FREEZE" ? "Freeze" : "Active"} through ${formatDate(f.dateOff)}, Inactive from ${formatDate(addDays(f.dateOff, 1))}.` : "Last day of collaboration"}
+            >
+              {/* An existing client can get a Date OFF ahead of time; it becomes Inactive the day after. */}
+              <Input type="date" value={f.dateOff} onChange={(e) => set("dateOff", e.target.value)} min={f.dateStart || undefined} max={mode === "create" ? today : undefined} disabled={mode === "edit" && !statusChanged} />
             </Field>
           ) : (
             <Field label="Period">

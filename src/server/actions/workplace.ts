@@ -2,8 +2,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission, requireUser } from "../auth/guard";
+import { toISO } from "@/lib/dates";
 import { runAction } from "../errors";
-import { archiveClient, changeClientStatus, createClient, removePackage, updateClient, updateIndustry, upsertAdAccountType, upsertCategory, upsertPackage } from "../services/clients";
+import { archiveClient, cancelScheduledInactive, changeClientStatus, createClient, removePackage, updateClient, updateIndustry, upsertAdAccountType, upsertCategory, upsertPackage } from "../services/clients";
 import { importClientsCsv } from "../services/client-import";
 import {
   acknowledgeRegulation,
@@ -106,9 +107,18 @@ export async function changeClientStatusAction(id: string, input: unknown) {
   return runAction(async () => {
     const me = await requireUser();
     const p = z.object({ status, effectiveDate: date.nullable().optional(), dateOff: date.nullable().optional(), reason: optText(500) }).parse(input);
-    await changeClientStatus(me, z.string().parse(id), p);
+    const after = await changeClientStatus(me, z.string().parse(id), p);
     refresh();
+    return { scheduledDateOff: after.scheduledDateOff ? toISO(after.scheduledDateOff) : null };
   }, "Status updated");
+}
+
+export async function cancelScheduledInactiveAction(id: string) {
+  return runAction(async () => {
+    const me = await requireUser();
+    await cancelScheduledInactive(me, z.string().parse(id));
+    refresh();
+  }, "Planned Date OFF cancelled");
 }
 
 export async function archiveClientAction(id: string, reason: unknown) {

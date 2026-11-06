@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { db } from "@/server/db";
 import { DomainError } from "@/server/errors";
 import { can } from "@/server/authz";
-import { changeClientStatus, clientsForEmployee, createClient, getClient, listClients, removePackage, updateClient, type CreateClientInput } from "@/server/services/clients";
+import { applyScheduledInactive, cancelScheduledInactive, changeClientStatus, clientsForEmployee, createClient, getClient, listClients, removePackage, updateClient, type CreateClientInput } from "@/server/services/clients";
 import { portfolioSummary, portfolioVisibleFor } from "@/server/services/client-metrics";
 import { DEFAULT_SETTINGS, getSettings, updateSettings } from "@/server/services/settings";
 import { clientCsvTemplate, importClientsCsv } from "@/server/services/client-import";
@@ -74,6 +74,7 @@ afterAll(async () => {
   await db.$disconnect();
 });
 beforeEach(async () => {
+  vi.setSystemTime(new Date("2026-11-02T03:00:00Z"));
   await resetDb();
   await db.$executeRawUnsafe(`ALTER SEQUENCE "client_code_seq" RESTART WITH 1`);
   org = await buildOrg();
@@ -153,6 +154,56 @@ describe("Client records", () => {
     expect([assigned.picPhone, assigned.picEmail]).toEqual(["+62 800 1234", "pic@brand.id"]);
     expect((await getClient(m, c.id)).picEmail).toBeNull(); // client.manage alone doesn't include client.sensitive
     await expectError(createClient(m, input({ name: "Bad", picEmail: "not-an-email" })), "VALIDATION", /PIC email/);
+  });
+});
+
+describe("Planned Date OFF", () => {
+  it("keeps the client active through Date OFF and makes it Inactive the day after", async () => {
+    const m = await manager();
+    const c = await createClient(m, input({ dateStart: "2025-03-01" }));
+    await changeClientStatus(m, c.id, { status: "INACTIVE", dateOff: "2026-11-30", reason: "Contract ends this month" });
+    let d = await getClient(m, c.id);
+    expect(d.status).toBe("ACTIVE");
+    expect(d.dateOff).toBeNull();
+    expect(d.scheduledDateOff).toBe("2026-11-30");
+    expect((await portfolioSummary(2026, 11)).active).toBeGreaterThan(0);
+
+    // still active on Date OFF itself
+    vi.setSystemTime(new Date("2026-11-30T03:00:00Z"));
+    expect((await getClient(m, c.id)).status).toBe("ACTIVE");
+
+    // the day after, the first read applies it as if it had been set then
+    vi.setSystemTime(new Date("2026-12-01T03:00:00Z"));
+    d = await getClient(m, c.id);
+    expect(d.status).toBe("INACTIVE");
+    expect(d.dateOff).toBe("2026-11-30");
+    expect(d.scheduledDateOff).toBeNull();
+    expect(d.statusHistory.map((h) => [h.status, h.from, h.to])).toEqual([
+      ["ACTIVE", "2025-03-01", "2026-11-30"],
+      ["INACTIVE", "2026-12-01", null],
+    ]);
+    expect(d.statusHistory.at(-1)!.reason).toBe("Contract ends this month");
+    expect(d.engagements.map((e) => [e.start, e.end])).toEqual([["2025-03-01", "2026-11-30"]]);
+    expect(await applyScheduledInactive()).toBe(0);
+  });
+
+  it("can be changed, cancelled, or replaced by a status change made now", async () => {
+    const m = await manager();
+    const c = await createClient(m, input({ dateStart: "2025-03-01" }));
+    await expectError(changeClientStatus(m, c.id, { status: "INACTIVE", dateOff: "2025-01-01" }), "VALIDATION", /earlier than Date START/);
+    await changeClientStatus(m, c.id, { status: "INACTIVE", dateOff: "2026-11-30" });
+    await changeClientStatus(m, c.id, { status: "INACTIVE", dateOff: "2026-12-15" });
+    expect((await getClient(m, c.id)).scheduledDateOff).toBe("2026-12-15");
+    await cancelScheduledInactive(m, c.id);
+    expect((await getClient(m, c.id)).scheduledDateOff).toBeNull();
+    await expectError(cancelScheduledInactive(m, c.id), "CONFLICT");
+
+    await changeClientStatus(m, c.id, { status: "INACTIVE", dateOff: "2026-11-30" });
+    await changeClientStatus(m, c.id, { status: "FREEZE", effectiveDate: "2026-11-02" });
+    vi.setSystemTime(new Date("2026-12-02T03:00:00Z"));
+    const d = await getClient(m, c.id);
+    expect(d.status).toBe("FREEZE");
+    expect(d.scheduledDateOff).toBeNull();
   });
 });
 

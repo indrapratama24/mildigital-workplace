@@ -8,7 +8,7 @@ import { DomainError } from "@/server/errors";
 import { formatDate, formatDateTime, todayJakarta } from "@/lib/dates";
 import { CLIENT_ROLE_LABEL, CLIENT_STATUS_LABEL } from "@/lib/engine/clients";
 import { STATUS_TONE } from "@/components/app/clients/status";
-import { ArchiveClientButton, ChangeStatusButton } from "@/components/app/clients/client-actions";
+import { ArchiveClientButton, ChangeStatusButton, ScheduledOffNotice } from "@/components/app/clients/client-actions";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Avatar, Notice, Table } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
@@ -68,11 +68,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 <KV k="Industry" v={c.industry ? `${c.industry}${c.subIndustry ? ` · ${c.subIndustry}` : ""}` : "—"} />
                 <KV k="Ad accounts" v={c.adAccounts.length ? c.adAccounts.join(", ") : "—"} />
                 <KV k="Date START" v={formatDate(c.dateStart)} />
-                <KV k="Date OFF" v={c.dateOff ? formatDate(c.dateOff) : "—"} />
+                <KV k="Date OFF" v={c.dateOff ? formatDate(c.dateOff) : c.scheduledDateOff ? `${formatDate(c.scheduledDateOff)} (planned)` : "—"} />
                 <KV k="Collaboration period" v={<b className="font-display text-[17px] text-brand-700">{c.period.label}</b>} />
                 <KV k="Days active" v={days(c.period.activeDays)} />
                 <KV k="Days frozen / inactive" v={c.period.frozenDays + c.period.inactiveDays ? `${days(c.period.frozenDays)} / ${days(c.period.inactiveDays)}` : "—"} />
               </div>
+              {c.scheduledDateOff && <ScheduledOffNotice id={c.id} dateOff={c.scheduledDateOff} canManage={manage} />}
               {c.displayStatus === "PREPARATION" && <Notice>Preparation — collaboration starts on {formatDate(c.dateStart)}. The client becomes Active automatically on that day and isn't counted in Active clients before then.</Notice>}
               {c.period.freezeSince && <Notice tone="warning">Frozen since {formatDate(c.period.freezeSince)} ({c.period.freezeLabel}). Freeze clients are reported separately from Active clients unless configured otherwise.</Notice>}
               {c.period.reactivated && <Notice>Reactivated client — earlier inactive periods are kept in the status history.</Notice>}

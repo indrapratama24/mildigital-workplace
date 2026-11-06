@@ -212,6 +212,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                     <td>
                       <Badge tone={STATUS_TONE[r.displayStatus]} dot>{CLIENT_STATUS_LABEL[r.displayStatus]}</Badge>
                       {r.displayStatus === "PREPARATION" && <div className="mt-0.5 text-[11px] text-muted">starts {formatDate(r.dateStart)}</div>}
+                      {r.scheduledDateOff && <div className="mt-0.5 text-[11px] text-warning">off after {formatDate(r.scheduledDateOff)}</div>}
                     </td>
                     <td>{r.package?.name ?? <span className="text-subtle">—</span>}</td>
                     <td>{formatDate(r.dateStart)}</td>

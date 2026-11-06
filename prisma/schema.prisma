@@ -1448,6 +1448,10 @@ model ClientBrand {
   dateStart               DateTime            @db.Date
   /// End of the latest collaboration while Inactive.
   dateOff                 DateTime?           @db.Date
+  /// Planned Date OFF (today or later): the client stays as it is and becomes Inactive the day after.
+  scheduledDateOff        DateTime?           @db.Date
+  scheduledOffReason      String?
+  scheduledOffById        String?
   categoryId              String?
   category                ClientCategory?     @relation(fields: [categoryId], references: [id])
   industryId              String?
