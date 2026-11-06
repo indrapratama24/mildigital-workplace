@@ -199,3 +199,10 @@ h3,
 table:has(.bulk-col) .freeze-col { left: 40px; }
 .freeze-col { box-shadow: inset -1px 0 0 var(--color-line-2); }
 tr:hover > .freeze-col, tr:hover > .bulk-col { background: color-mix(in srgb, var(--color-canvas) 50%, var(--color-surface)); }
+/* Phones: the frozen column takes at most about a third of the screen so the other columns stay visible;
+   long names and subtitles are cut with an ellipsis (each cell truncates its own lines). */
+@media (max-width: 639px) {
+  .freeze-col { padding-left: 10px !important; padding-right: 8px !important; }
+  .freeze-col > * { max-width: min(34vw, 150px); }
+  table:has(.bulk-col) .freeze-col > * { max-width: min(28vw, 130px); }
+}

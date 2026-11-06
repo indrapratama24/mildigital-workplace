@@ -203,8 +203,8 @@ export default async function LeaveReportPage({ searchParams }: { searchParams: 
                   {shown.map((r) => (
                     <tr key={r.id} className="hover:bg-canvas/60">
                       <td className="freeze-col">
-                        <Link href={href({ employee: r.employeeId, page: undefined })} className="font-medium text-ink hover:text-brand-700">{r.fullName}</Link>
-                        <div className="text-[11.5px] text-muted">{r.teamName ?? "—"}</div>
+                        <Link href={href({ employee: r.employeeId, page: undefined })} className="block truncate font-medium text-ink hover:text-brand-700">{r.fullName}</Link>
+                        <div className="truncate text-[11.5px] text-muted">{r.teamName ?? "—"}</div>
                       </td>
                       <td><Link href={`/requests/${r.id}`} className="text-ink hover:text-brand-700 hover:underline">{r.typeName}</Link></td>
                       <td>{formatDateRange(r.startDate, r.endDate)}</td>

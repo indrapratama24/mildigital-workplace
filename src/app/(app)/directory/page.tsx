@@ -235,13 +235,13 @@ export default async function DirectoryPage({ searchParams }: { searchParams: Pr
                   <tr key={r.id} className="hover:bg-canvas/50">
                     <BulkCell id={r.id} label={r.name} />
                     <td className="freeze-col">
-                      <Link href={`/directory/${r.id}`} className="flex items-center gap-2.5">
-                        <Avatar name={r.name} photoId={r.photoId} />
-                        <span>
-                          <span className="block font-medium text-ink hover:text-brand-700">{r.name}</span>
-                          <span className="block text-[11.5px] text-muted">{r.title}</span>
+                      <Link href={`/directory/${r.id}`} title={`${r.name} · ${r.title}`} className="flex min-w-0 items-center gap-2 sm:gap-2.5">
+                        <Avatar name={r.name} photoId={r.photoId} className="hidden sm:inline-flex" />
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-ink hover:text-brand-700">{r.name}</span>
+                          <span className="block truncate text-[11.5px] text-muted">{r.title}</span>
                         </span>
-                        {!r.isActive && <Badge tone="danger">Inactive</Badge>}
+                        {!r.isActive && <Badge tone="danger" className="shrink-0">Inactive</Badge>}
                       </Link>
                     </td>
                     <td>{r.nickname ?? <span className="text-subtle">—</span>}</td>

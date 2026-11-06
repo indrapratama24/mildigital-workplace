@@ -68,7 +68,7 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
           <table className="w-full border-collapse text-[12px]">
             <thead>
               <tr>
-                <th className="sticky left-0 z-10 min-w-[200px] border-b border-line bg-white px-3 py-2 text-left text-[12px] font-medium text-muted">Employee</th>
+                <th className="sticky left-0 z-10 w-[120px] max-w-[120px] border-b border-line bg-white px-2 py-2 text-left text-[12px] font-medium text-muted sm:w-auto sm:min-w-[200px] sm:max-w-none sm:px-3">Employee</th>
                 {days.map((d) => (
                   <th key={d.date} className={cn("min-w-[34px] border-b border-line px-0.5 py-1.5 text-center font-medium", d.weekday > 5 ? "bg-canvas text-subtle" : "text-muted", d.date === today && "bg-brand-50 text-brand-700")}>
                     <div className="text-[10px] uppercase">{WEEKDAY_SHORT[d.weekday].slice(0, 2)}</div>
@@ -88,8 +88,8 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
                 const pendingReq = ctx.requests.filter((r) => r.status === "PENDING_DELEGATE" || r.status === "PENDING_LEADER");
                 return (
                   <tr key={e.id} className="hover:bg-canvas/50">
-                    <td className="sticky left-0 z-10 border-b border-line-2 bg-white px-3 py-1.5">
-                      <Link href={`/calendar?month=${monthParam(year, month)}&employee=${e.id}`} className="font-medium text-ink hover:text-brand-700">
+                    <td className="sticky left-0 z-10 max-w-[120px] border-b border-line-2 bg-white px-2 py-1.5 sm:max-w-none sm:px-3">
+                      <Link href={`/calendar?month=${monthParam(year, month)}&employee=${e.id}`} title={e.fullName} className="block truncate font-medium text-ink hover:text-brand-700">
                         {e.fullName}
                       </Link>
                       <div className="flex items-center gap-1.5 text-[11px] text-muted">
@@ -136,7 +136,7 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
                 );
               })}
               <tr>
-                <td className="sticky left-0 z-10 bg-white px-3 py-2 text-[11.5px] font-medium text-muted">In office</td>
+                <td className="sticky left-0 z-10 bg-white px-2 py-2 text-[11.5px] font-medium text-muted sm:px-3">In office</td>
                 {days.map((d) => (
                   <td key={d.date} className="py-2 text-center text-[11px] font-semibold text-brand-700 tabular">
                     {d.weekday <= 5 ? officeCount.get(d.date) ?? "" : ""}

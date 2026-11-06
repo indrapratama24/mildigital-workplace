@@ -202,9 +202,9 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                 {list.rows.map((r) => (
                   <tr key={r.id} className="hover:bg-canvas/50">
                     <BulkCell id={r.id} label={r.name} />
-                    <td className="freeze-col max-w-[260px]">
-                      <Link href={`/clients/${r.id}`} className="block truncate font-medium text-ink hover:text-brand-700">{r.name}</Link>
-                      <div className="truncate text-[11.5px] text-muted">
+                    <td className="freeze-col">
+                      <Link href={`/clients/${r.id}`} title={r.name} className="block max-w-[260px] truncate font-medium text-ink hover:text-brand-700">{r.name}</Link>
+                      <div className="max-w-[260px] truncate text-[11.5px] text-muted">
                         <span className="font-mono text-ink-2">{r.clientCode}</span>
                         {(r.industry || r.category) && <> · {[r.category, r.industry, r.subIndustry].filter(Boolean).join(" · ")}</>}
                       </div>
