@@ -27,6 +27,7 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
     orderBy: { fullName: "asc" },
   });
   const ctxs = await loadMonthContexts(employees.map((e) => e.id), year, month);
+  const officeMode = !![...ctxs.values()][0]?.office;
   const days = [...ctxs.values()][0]?.requirement?.days ?? [];
   const prev = addMonths(year, month, -1),
     next = addMonths(year, month, 1);
@@ -41,7 +42,15 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
 
   return (
     <>
-      <PageHeader eyebrow="Team Calendar" title="Who's where" description="Approved plans (or drafts when not yet approved), leave, offsite and holidays for your team. Use it to check office coverage before approving." />
+      <PageHeader
+        eyebrow="Team Calendar"
+        title="Who's where"
+        description={
+          officeMode
+            ? "The office schedule with each person's approved changes, leave, offsite and holidays. Use it to check office coverage before approving."
+            : "Approved plans (or drafts when not yet approved), leave, offsite and holidays for your team. Use it to check office coverage before approving."
+        }
+      />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center rounded-full border border-line bg-white p-1">
           <Link href={q(prev)} className="rounded-full p-1.5 text-muted hover:bg-brand-50" aria-label="Previous month">
@@ -84,7 +93,11 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
                         {e.fullName}
                       </Link>
                       <div className="flex items-center gap-1.5 text-[11px] text-muted">
-                        <StatusBadge status={ctx.schedule?.status ?? "NOT_STARTED"} className="px-1.5 py-0 text-[10.5px]" />
+                        {officeMode ? (
+                          ctx.pendingRevisions.length > 0 && <StatusBadge status="REVISION_PENDING" className="px-1.5 py-0 text-[10.5px]" />
+                        ) : (
+                          <StatusBadge status={ctx.schedule?.status ?? "NOT_STARTED"} className="px-1.5 py-0 text-[10.5px]" />
+                        )}
                       </div>
                     </td>
                     {(ctx.requirement?.days ?? days).map((d) => {
@@ -100,7 +113,7 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
                       else if (m === "WFH") (cls = approved ? "bg-wfh-soft text-brand-600" : "bg-white text-brand-600 border border-dashed border-wfh"), (label = "H");
                       if (d.kind === "WORKDAY" && m === "WFH") label = "R";
                       return (
-                        <td key={d.date} className="border-b border-line-2 p-0.5 text-center" title={`${d.date}${d.holiday ? ` · ${d.holiday.name}` : ""}${d.leave ? ` · ${d.leave.label}` : ""}`}>
+                        <td key={d.date} className="border-b border-line-2 p-0.5 text-center" title={`${d.date}${d.holiday ? ` · ${d.holiday.name}` : ""}${d.leave ? ` · ${d.leave.label}` : ""}${ctx.office?.[d.date]?.note && d.plannable ? ` · ${ctx.office[d.date].note}` : ""}${ctx.dayNotes[d.date] ? ` · ${ctx.dayNotes[d.date]}` : ""}`}>
                           <div className={cn("relative mx-auto flex h-7 w-full min-w-[28px] items-center justify-center rounded-md text-[10.5px] font-semibold", cls, (pendingDates.has(d.date) || isPendingReq) && "ring-2 ring-pending")}>
                             {label}
                             {d.mandatory && <span className="absolute right-0.5 top-0.5 h-1 w-1 rounded-full bg-current opacity-70" />}
@@ -109,7 +122,9 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
                       );
                     })}
                     <td className="border-b border-line-2 px-3 text-right tabular">
-                      {ev ? (
+                      {ev && officeMode ? (
+                        <span className="text-ink">{ev.plannedWfo}</span>
+                      ) : ev ? (
                         <span className={ev.shortfall ? "text-danger" : "text-ink"}>
                           {ev.plannedWfo}/{ctx.requirement!.effectiveMinimumWfo}
                         </span>
@@ -138,9 +153,9 @@ export default async function TeamCalendarPage({ searchParams }: { searchParams:
           <span><b className="text-leave">L</b> Leave / permission</span>
           <span><b className="text-offsite">OS</b> Offsite</span>
           <span><b className="text-holiday">H</b> Holiday</span>
-          <span>Dashed = draft, not yet approved</span>
+          {!officeMode && <span>Dashed = draft, not yet approved</span>}
           <span>Orange ring = pending change/request</span>
-          <span>Dot = mandatory day</span>
+          {!officeMode && <span>Dot = mandatory day</span>}
         </div>
       </Card>
     </>

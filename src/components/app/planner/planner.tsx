@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, History, RotateCcw, Save, Send, Sparkles, Scale, GitPullRequestArrow, Info, AlertTriangle, CalendarRange, Building2, CalendarClock } from "lucide-react";
+import { ChevronLeft, ChevronRight, History, RotateCcw, Save, Send, Sparkles, Scale, GitPullRequestArrow, Info, AlertTriangle, CalendarRange, Building2, MessageSquareText } from "lucide-react";
 import { evaluatePlan, type MonthRequirement } from "@/lib/engine/working-days";
 import { formatDate, formatDateTime, formatMonth, WEEKDAY_SHORT } from "@/lib/dates";
 import type { PlannerData } from "@/server/services/schedules";
@@ -11,6 +11,7 @@ import { autoGenerateAction, resetDraftAction, saveDraftAction, submitScheduleAc
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status";
+import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { Notice, Progress } from "@/components/ui/misc";
 import { Select } from "@/components/ui/field";
@@ -36,7 +37,8 @@ function PlannerInner({ data, employees, prevHref, nextHref }: PlannerProps) {
   const { open: openEvent } = useEventDialog();
   const [pending, start] = useTransition();
   const status = data.schedule?.status ?? "NOT_STARTED";
-  const approvedView = ["APPROVED", "REVISION_PENDING"].includes(status);
+  // With the WFO Policy off the calendar is the office schedule: always official, never a draft.
+  const approvedView = data.officeMode || ["APPROVED", "REVISION_PENDING"].includes(status);
   // Mandatory WFO days are locked to WFO in drafts (the server persists the same rule).
   const initial = useMemo(
     () => Object.fromEntries(data.days.filter((d) => d.plannable).map((d) => [d.date, (approvedView ? d.approved : d.mandatory ? "WFO" : d.planned) as Mode])),
@@ -186,7 +188,13 @@ function PlannerInner({ data, employees, prevHref, nextHref }: PlannerProps) {
               ))}
             </Select>
           )}
-          <StatusBadge status={status} />
+          {data.officeMode ? (
+            <Badge tone="brand" dot>
+              Office schedule
+            </Badge>
+          ) : (
+            <StatusBadge status={status} />
+          )}
           {dirty && <span className="text-[12px] font-medium text-pending">Unsaved changes</span>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -215,20 +223,30 @@ function PlannerInner({ data, employees, prevHref, nextHref }: PlannerProps) {
             </>
           )}
           {data.canRevise && (
-            <Button size="sm" variant={selected.length ? "primary" : "subtle"} onClick={() => (selected.length ? setRevisionOpen(true) : toast.info("Select the approved date(s) you want to change, then request a revision."))}>
-              <GitPullRequestArrow className="h-4 w-4" /> Request revision{selected.length ? ` (${selected.length})` : ""}
+            <Button
+              size="sm"
+              variant={selected.length ? "primary" : "subtle"}
+              onClick={() => (selected.length ? setRevisionOpen(true) : toast.info(data.officeMode ? "Select the date(s) you want to change, then request a change." : "Select the approved date(s) you want to change, then request a revision."))}
+            >
+              <GitPullRequestArrow className="h-4 w-4" /> {data.officeMode ? "Request change" : "Request revision"}
+              {selected.length ? ` (${selected.length})` : ""}
             </Button>
           )}
         </div>
       </div>
 
-      {!data.policy && <Notice tone="danger" title="No WFO policy assigned">HR must assign a level/policy before this month can be planned.</Notice>}
+      {!data.policy && !data.officeMode && <Notice tone="danger" title="No WFO policy assigned">HR must assign a level/policy before this month can be planned.</Notice>}
       {data.schedule?.lastComment && ["CHANGES_REQUESTED", "REJECTED"].includes(status) && (
         <Notice tone="warning" title={status === "REJECTED" ? "Your leader rejected this plan" : "Your leader requested changes"}>
           “{data.schedule.lastComment}” — edit the plan and submit again.
         </Notice>
       )}
-      {data.canRevise && (
+      {data.officeMode && data.isSelf && (
+        <Notice tone="info">
+          Your calendar follows the office schedule set by the Super Admin. To change a day, click future dates and then <b>Request change</b>: an extra office day is saved straight away; working from home on an office day needs your leader&apos;s approval.
+        </Notice>
+      )}
+      {data.canRevise && !data.officeMode && (
         <Notice tone="info">
           This plan is approved and can&apos;t be overwritten. Click future dates to select them, then <b>Request revision</b> — only those dates change after your leader approves.
         </Notice>
@@ -291,7 +309,7 @@ function PlannerInner({ data, employees, prevHref, nextHref }: PlannerProps) {
             {[1, 2, 3, 4, 5, 6, 7].map((w) => (
               <div key={w} className={cn("px-1 pb-1 text-center text-[11.5px] font-semibold uppercase tracking-wide", w > 5 ? "text-subtle" : "text-muted")}>
                 {WEEKDAY_SHORT[w]}
-                {data.policy?.mandatoryWeekdays.includes(w) && <span className="ml-1 text-brand-600">•</span>}
+                {(data.officeMode ? data.officeWeekdays : data.policy?.mandatoryWeekdays ?? []).includes(w) && <span className="ml-1 text-brand-600">•</span>}
               </div>
             ))}
             {weeks.flat().map((day, i) =>
@@ -312,19 +330,28 @@ function PlannerInner({ data, employees, prevHref, nextHref }: PlannerProps) {
             )}
           </div>
           <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 border-t border-line-2 px-1 pt-3">
-            {LEGEND.map((l) => (
+            {/* The office schedule has no drafts: only "WFO" and "WFH" */}
+            {(data.officeMode ? LEGEND.filter((l) => !l.label.startsWith("Planned")).map((l) => ({ ...l, label: l.label.replace(/^Approved /, "") })) : LEGEND).map((l) => (
               <span key={l.label} className="inline-flex items-center gap-1.5 text-[11.5px] text-muted">
                 <span className={cn("h-3 w-3 rounded", l.swatch)} aria-hidden />
                 {l.label}
               </span>
             ))}
-            <span className="inline-flex items-center gap-1.5 text-[11.5px] text-muted">🔒 Mandatory WFO</span>
+            {data.officeMode ? (
+              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-muted">
+                <MessageSquareText className="h-3 w-3" /> Note · • usual office day
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-muted">🔒 Mandatory WFO</span>
+            )}
           </div>
         </Card>
 
         {/* Side panel */}
         <div className="space-y-4">
-          {data.requirement && ev && (
+          {data.officeMode && <OfficeSummary data={data} />}
+
+          {data.requirement && ev && !data.officeMode && (
             <Card>
               <CardHeader title="WFO target" description={data.policy ? `${data.policy.name}${data.policy.source === "snapshot" ? " (locked at submission)" : data.policy.source === "override" ? " (override)" : ""}` : undefined} />
               <CardBody className="space-y-4">
@@ -374,14 +401,14 @@ function PlannerInner({ data, employees, prevHref, nextHref }: PlannerProps) {
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">
                   <Metric label="Verified WFO" value={data.attendanceEval.actualWfoVerified + data.attendanceEval.offsiteCreditToDate} />
                   <Metric label="Unverified" value={data.attendanceEval.actualWfoUnverified} />
-                  <Metric label="Remaining WFO" value={data.attendanceEval.remainingRequiredWfo} />
+                  {!data.officeMode && <Metric label="Remaining WFO" value={data.attendanceEval.remainingRequiredWfo} />}
                   <Metric label="Missing check-ins" value={data.attendanceEval.unauthorizedAbsences.length} tone={data.attendanceEval.unauthorizedAbsences.length ? "danger" : undefined} />
                 </dl>
               </CardBody>
             </Card>
           )}
 
-          {data.requirement && data.requirement.warnings.length > 0 && (
+          {data.requirement && !data.officeMode && data.requirement.warnings.length > 0 && (
             <Card>
               <CardHeader title="Policy notes" />
               <CardBody className="space-y-2">
@@ -567,6 +594,43 @@ function PlannerInner({ data, employees, prevHref, nextHref }: PlannerProps) {
         />
       )}
     </div>
+  );
+}
+
+/** WFO Policy off: what the office schedule looks like this month, and the notes on it. */
+function OfficeSummary({ data }: { data: PlannerData }) {
+  const work = data.days.filter((d) => d.plannable);
+  const wfo = work.filter((d) => d.approved === "WFO").length;
+  const own = work.filter((d) => d.personal).length;
+  const notes = data.days.filter((d) => d.office?.note || d.note);
+  return (
+    <Card>
+      <CardHeader title="Office schedule" description={data.officeWeekdays.length ? `Usual office days: ${data.officeWeekdays.map((w) => WEEKDAY_SHORT[w]).join(", ")}` : "Set by the Super Admin"} />
+      <CardBody className="space-y-4">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">
+          <Metric label="WFO days" value={wfo} />
+          <Metric label="WFH days" value={work.length - wfo} />
+          <Metric label="Working days" value={data.requirement?.eligibleWorkingDays ?? work.length} />
+          <Metric label="Your changes" value={own} />
+          {(data.requirement?.fullLeaveDays ?? 0) > 0 && <Metric label="Approved leave" value={data.requirement!.fullLeaveDays} />}
+          {(data.requirement?.holidayDays ?? 0) > 0 && <Metric label="Holidays" value={data.requirement!.holidayDays} />}
+        </dl>
+        {notes.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-[12px] font-semibold uppercase tracking-wide text-muted">Notes</div>
+            {notes.map((d) => (
+              <div key={d.date} className="flex gap-2 text-[12.5px]">
+                <span className="w-[52px] shrink-0 font-medium text-ink">{formatDate(d.date).replace(/ \d{4}$/, "")}</span>
+                <span className="min-w-0 text-ink-2">
+                  {d.office?.note && <span className="block">{d.office.note}</span>}
+                  {d.note && <span className="block text-muted">You: {d.note}</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardBody>
+    </Card>
   );
 }
 

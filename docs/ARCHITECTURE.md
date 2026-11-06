@@ -95,6 +95,18 @@ Maximum WFH              = plannable days + offsite credit − effective minimum
 
 For month *M* the policy is resolved on the 1st of *M*: explicit override → level effective that day → the policy version effective that day. When a schedule is submitted, the version is **snapshotted** on the schedule, so later policy edits or level changes never alter submitted/approved months. Drafts always follow the current applicable version. Policy edits create a new version with an effective date (the previous one is closed the day before; retroactive overlap is rejected).
 
+## WFO Policy switch & office schedule
+
+Settings → *WFO Policy & office schedule* (`policy.manage`; the switch itself also needs `settings.manage`) turns the WFO Policy on or off (`SystemSetting.wfoPolicyEnabled`, default on).
+
+- **On:** everything above applies — monthly plans, submission deadlines, WFO percentages, shortfalls.
+- **Off (office schedule mode):** the Super Admin decides the WFO days and every My Work Calendar follows them. There is no plan to submit, no WFO minimum or percentage, no deadline reminders and no shortfall detection; Home, Team Calendar, Compliance, Directory and approvals hide the percentage views (Compliance becomes attendance-only).
+- **Office schedule** (`src/lib/engine/office.ts`, pure): company weekly WFO days (`officeWfoWeekdays` setting), optional per-team weekly days (`TeamOfficePattern`) and date overrides with an optional note (`OfficeDay`, company or team; partial unique indexes keep one per date per scope). Resolution order: team date override → company date override → team weekly days → company weekly days, so closing the office for everyone wins over any team's usual days.
+- **Overlay, not copies:** `loadMonthContexts` computes each employee's days from the office schedule, except days the employee changed themselves (`ScheduleDay.personal`) and frozen past days (`ScheduleDay.frozen`). The requirement is computed with neutral rules (0 %, no mandatory weekdays), so every downstream evaluation sees no target.
+- **Employee changes** (revisions): WFH → WFO is applied at once (revision recorded as approved, the optional note is shown on the day); WFO → WFH goes to the leader with a reason. A mixed request is split. A mandatory in-office event still needs an authorised exception.
+- **Super Admin wins:** setting a date replaces employees' own changes on that date; changing weekly days replaces them on dates whose mode changed. Affected employees get an `OFFICE_SCHEDULE_CHANGED` notification. Edits only reach today onwards.
+- **History is kept:** before any office schedule change, on switching, and in the daily job, days before today are frozen with the mode they had. Turning the policy back on saves the office schedule as each employee's approved plan for this month and next, so they revise from what they were following.
+
 ## Workflows
 
 **Monthly schedule:** Draft → (Submitted) → Pending leader approval → Approved; alternatives Changes requested / Rejected (editable again), Revision pending (while date-level revisions are open), Superseded (snapshot kinds). Approved schedules can't be edited — the service rejects it and the UI routes to a revision. Policies may disable leader approval (auto-approve on submit).

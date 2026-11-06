@@ -66,20 +66,28 @@ export function RevisionDialog({ open, onOpenChange, data, selected, onDone }: {
 
   const shortfall = impact?.shortfall ?? 0;
   const blockingReplacement = shortfall > 0 && !impact?.requiresException;
+  // Office schedule mode: extra office days apply at once and the reason is an optional note; WFH needs a reason.
+  const office = data.officeMode;
+  const needsReason = !office || changes.some((c) => c.toMode === "WFH");
+  const onlyOffice = office && !needsReason;
   return (
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Request a schedule change"
-      description="Only the dates below change after your leader approves. Your approved plan stays in effect until then."
+      title={office ? "Change my office days" : "Request a schedule change"}
+      description={
+        office
+          ? "An extra office day is saved straight away. Working from home on an office day needs your leader's approval; until then the office schedule stays."
+          : "Only the dates below change after your leader approves. Your approved plan stays in effect until then."
+      }
       className="sm:max-w-xl"
       footer={
         <>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} loading={pending} disabled={!changes.length || reason.trim().length < 10 || blockingReplacement || (impact?.requiresException && !exception) || !!impact?.invalid.length}>
-            Submit change request
+          <Button onClick={submit} loading={pending} disabled={!changes.length || (needsReason && reason.trim().length < 10) || blockingReplacement || (impact?.requiresException && !exception) || !!impact?.invalid.length}>
+            {onlyOffice ? "Save office days" : office ? "Send to my leader" : "Submit change request"}
           </Button>
         </>
       }
@@ -106,7 +114,7 @@ export function RevisionDialog({ open, onOpenChange, data, selected, onDone }: {
           })}
         </div>
 
-        {impact && (
+        {impact && !office && (
           <div className="rounded-2xl bg-canvas p-4">
             <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted">Impact on this month</div>
             <div className="grid grid-cols-3 gap-3 text-center">
@@ -150,13 +158,19 @@ export function RevisionDialog({ open, onOpenChange, data, selected, onDone }: {
               checked={exception}
               onChange={(e) => setException(e.target.checked)}
               label="Request an authorised exception"
-              description="Your leader (and HR if your policy requires) must approve. The shortfall is recorded as an exception — you are not silently marked compliant."
+              description={office ? "Your leader decides whether you may stay home despite the event." : "Your leader (and HR if your policy requires) must approve. The shortfall is recorded as an exception — you are not silently marked compliant."}
             />
           </Notice>
         )}
-        <Field label="Reason" required hint="At least 10 characters. Your leader sees this.">
-          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} placeholder="e.g. Client workshop moved to Thursday" />
-        </Field>
+        {needsReason ? (
+          <Field label="Reason" required hint={`At least 10 characters. Your leader sees this.${office && changes.some((c) => c.toMode === "WFO") ? " It is also the note on your extra office days." : ""}`}>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} placeholder={office ? "e.g. Waiting for a home delivery all day" : "e.g. Client workshop moved to Thursday"} />
+          </Field>
+        ) : (
+          <Field label="Note" hint="Optional. Shown on the day in your calendar.">
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} placeholder="e.g. Client meeting at the office" />
+          </Field>
+        )}
       </div>
     </Dialog>
   );

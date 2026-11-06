@@ -235,6 +235,8 @@ model Team {
   memberships    EmployeeTeamMembership[]
   calendarGrants InternalCalendarPermission[]
   announcements  AnnouncementAudience[]
+  officePattern  TeamOfficePattern?
+  officeDays     OfficeDay[]
 
   @@unique([departmentId, name])
 }
@@ -495,9 +497,39 @@ model ScheduleDay {
   date         DateTime        @db.Date
   plannedMode  WorkMode?
   approvedMode WorkMode?
+  /// Office schedule mode: the employee's own approved change (kept until the office schedule changes that date).
+  personal     Boolean         @default(false)
+  /// Office schedule mode: a past day kept as it was (later office schedule edits never rewrite it).
+  frozen       Boolean         @default(false)
+  /// Employee's note on the day (e.g. why they come to the office).
+  note         String?
   updatedAt    DateTime        @updatedAt
 
   @@unique([scheduleId, date])
+}
+
+/// Office schedule (used while the WFO Policy is off): a team's own weekly WFO days. The company pattern is a setting.
+model TeamOfficePattern {
+  teamId      String   @id
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  wfoWeekdays Int[]
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+/// Office schedule date override for the company (teamId null) or one team: office closed, extra office day, or a note.
+model OfficeDay {
+  id          String   @id @default(cuid())
+  teamId      String?
+  team        Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  mode        WorkMode
+  note        String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
 }
 
 /// Immutable snapshot written on every submission / approval / applied revision.

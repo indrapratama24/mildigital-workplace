@@ -95,7 +95,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ stepId:
       <PageHeader
         eyebrow={wf.subjectType === "SCHEDULE" ? "Work plan review" : "Schedule change review"}
         title={`${wf.requester.fullName} · ${formatMonth(schedule.year, schedule.month)}`}
-        description={`${wf.requester.jobTitle} · ${data.policy ? data.policy.name : "no policy"} · submitted ${formatDateTime(wf.createdAt)}`}
+        description={`${wf.requester.jobTitle} · ${data.officeMode ? "office schedule" : data.policy ? data.policy.name : "no policy"} · submitted ${formatDateTime(wf.createdAt)}`}
         actions={<StatusBadge status={wf.status === "PENDING" ? step.status : wf.status} />}
       />
       <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
@@ -105,7 +105,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ stepId:
               <CardHeader title="Requested change" description={describeChanges(revision.items.map((i) => ({ date: toISO(i.date), toMode: i.toMode, isReplacement: i.isReplacement })))} />
               <CardBody className="space-y-3 text-sm">
                 <div className="rounded-xl bg-canvas px-3 py-2 text-ink-2">“{revision.reason}”</div>
-                {impact && (
+                {impact && !data.officeMode && (
                   <div className="grid grid-cols-3 gap-3 text-center">
                     <Num label="WFO before" v={impact.plannedWfoBefore} />
                     <Num label="WFO after" v={impact.plannedWfoAfter} tone={impact.plannedWfoAfter < impact.minimumRequired ? "danger" : "success"} />
@@ -124,8 +124,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ stepId:
           )}
           <Card className="p-3 sm:p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
-              <div className="text-sm font-semibold text-ink">{showPlanned ? "Submitted plan" : "Approved plan with the change applied"}</div>
-              {ev && data.requirement && (
+              <div className="text-sm font-semibold text-ink">{showPlanned ? "Submitted plan" : data.officeMode ? "Office schedule with the change applied" : "Approved plan with the change applied"}</div>
+              {ev && data.requirement && !data.officeMode && (
                 <div className="text-[13px] text-muted">
                   <b className="text-ink">{ev.plannedWfo}</b> WFO / min <b className="text-ink">{data.requirement.effectiveMinimumWfo}</b> · {ev.plannedPercent}% · {ev.compliant ? <span className="text-success">meets policy</span> : <span className="text-danger">{ev.violations.join("; ")}</span>}
                 </div>
@@ -147,7 +147,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ stepId:
               ))}
             </div>
           </Card>
-          {data.requirement && data.requirement.warnings.length > 0 && (
+          {data.requirement && !data.officeMode && data.requirement.warnings.length > 0 && (
             <Notice tone="info" title="Policy notes">
               <ul className="list-disc pl-4">
                 {data.requirement.warnings.map((w) => (

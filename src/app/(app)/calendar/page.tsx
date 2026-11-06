@@ -35,9 +35,11 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         eyebrow={isSelf ? "My Work Calendar" : "Viewing team member"}
-        title={isSelf ? "Plan your month" : data.employee.fullName}
+        title={isSelf ? (data.officeMode ? "Your office days" : "Plan your month") : data.employee.fullName}
         description={
-          isSelf
+          isSelf && data.officeMode
+            ? "WFO and WFH days come from the office schedule. Click future days to ask for a change."
+            : isSelf
             ? "Click working days to switch between WFO and WFH. Mandatory days are locked, weekends and holidays are disabled. Submit when the plan meets your target."
             : `${data.employee.jobTitle} · read-only view of their plan, leave and attendance.`
         }

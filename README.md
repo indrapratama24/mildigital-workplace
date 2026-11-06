@@ -2,7 +2,7 @@
 
 Internal platform for MIL Digital: Home dashboard, Company Hub (Company 101, regulations, announcements, recognition), Team Directory, Client & Portfolio, plus the hybrid-work features — WFO/WFH policies, monthly work plans, leave & permission requests with peer delegation, two-layer approvals, Internal Calendar, attendance verification and compliance reporting.
 
-**Stack:** Next.js 15 (App Router, Server Actions) · TypeScript · Tailwind CSS 4 · Radix UI (shadcn-style components) · PostgreSQL · Prisma 6 · Vitest.
+**Stack:** Next.js 15 (App Router, Server Actions) · TypeScript · Tailwind CSS 4 · Radix UI (shadcn-style components) · PostgreSQL · Prisma 7 · Vitest.
 Timezone **Asia/Jakarta**; dates are displayed in Indonesian format (`20 Okt 2026`). UI language is English.
 
 - Architecture, data model, rules and limitations: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (incl. **Internal Calendar** and **Workplace Phase 1**: Company Hub, Client & Portfolio, access grants)
@@ -84,6 +84,10 @@ The seed creates its workflow data **through the real services** (plans submitte
 | `npm run cron` | Run daily jobs once (reminders, shortfall detection, escalation) |
 | `npm run lint` | Type check |
 
+## WFO Policy or office schedule
+
+The WFO Policy can be switched off in **Settings → WFO Policy & office schedule** (Super Admin). While it is off, the Super Admin sets the office schedule — company weekly WFO days, optional team days, and per-date changes with a note (e.g. office closed) — and every My Work Calendar follows it. Employees can still request changes: an extra office day is saved at once, working from home on an office day needs leader approval. No WFO percentage is calculated. Set the company's weekly office days before switching it off. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#wfo-policy-switch--office-schedule).
+
 ## Internal Calendar (demo data)
 
 Seeded calendar permissions: **Sari** = Calendar manager (all), **Budi** = editor for the Growth department, **Creative Studio team** = organizers for their team, **Leaders (role)** = viewers. Indra (Super Admin) manages everything. Seeded events (demo times, clearly marked): Weekly Huddle — Resilience (every Monday), Ads Strategist Meeting — Google Ads Metrics, Weekly Performance Meeting — B2B Services, Gamification, PitchLab, ATLAS Demo — Report Generator, plus one draft. Several employees get schedule-conflict warnings (e.g. Ayu on 27 and 30 Oct).
@@ -97,6 +101,7 @@ The seed adds fictional demo content (marked “Demo text”): Company 101 secti
 - `tests/unit/engine.test.ts` — 33 tests: 50/75/80% policies, rounding, month lengths, leap years, public holidays and cuti bersama, mandatory-day conflicts, leave and the denominator, half days, offsite, exceptions, plan generation & balancing, revision impact/replacement, attendance statuses, quarterly aggregation, policy validation.
 - `tests/unit/clients.test.ts` — client period, status-on-date, new-client and team rules.
 - `tests/integration/workplace.test.ts` — permission grants, Client ID uniqueness/never reused, Date START/OFF and team validation, DB cap of 3 Ads Strategists, assignment history, sensitive client data, effective-dated status history & historical counts, package history/archiving, regulation drafts/revisions/acknowledgements, announcement status/schedule/expiry/audience.
+- `tests/unit/office.test.ts` and `tests/integration/office.test.ts` — office schedule resolution order, switching the WFO Policy off and on (past days kept), team days and closures with notes, extra office days applied at once, WFH sent to the leader, Super Admin changes replacing employees' own changes, daily job in office mode.
 - `tests/integration/workflows.test.ts` — 19 tests on PostgreSQL with "today" frozen at 2 Nov 2026: acceptance **Scenarios A–F**, two-layer approval, delegation decline & resubmission, circular delegation, unavailable delegate, overlapping requests, leader reassignment (history keeps the original approver), backup-approver fallback, unauthorized/self/double approval, duplicate & idempotent submissions, DB-level unique pending workflow, append-only history tables, historical policy versions, attendance corrections.
 
 ## Deployment (Vercel)

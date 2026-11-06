@@ -1,6 +1,8 @@
 import { db } from "@/server/db";
 import { requirePagePermission } from "@/server/auth/guard";
 import { listPoliciesWithVersions } from "@/server/services/policy";
+import { getSettings } from "@/server/services/settings";
+import Link from "next/link";
 import { formatDate, todayJakarta, toISO, WEEKDAY_SHORT } from "@/lib/dates";
 import { validatePolicyRules } from "@/lib/engine/working-days";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -11,12 +13,21 @@ import { CancelVersionButton, LevelRow, NewLevelForm, NewPolicyForm, PolicyEditD
 export default async function PoliciesPage() {
   await requirePagePermission("policy.manage");
   const today = todayJakarta();
-  const [allPolicies, levels] = await Promise.all([listPoliciesWithVersions(), db.employeeLevel.findMany({ orderBy: { rank: "asc" } })]);
+  const [allPolicies, levels, settings] = await Promise.all([listPoliciesWithVersions(), db.employeeLevel.findMany({ orderBy: { rank: "asc" } }), getSettings()]);
   const policies = allPolicies.filter((p) => p.isActive);
   const archived = allPolicies.filter((p) => !p.isActive);
   const days = (d: number[]) => (d.length ? d.map((x) => WEEKDAY_SHORT[x]).join(", ") : "none");
   return (
     <div className="space-y-5">
+      {!settings.wfoPolicyEnabled && (
+        <Notice tone="warning" title="The WFO Policy is off">
+          These policies aren&apos;t used right now: calendars follow the office schedule. Turn the WFO Policy on in{" "}
+          <Link href="/settings/office" className="font-medium text-brand-700 hover:underline">
+            WFO Policy &amp; office schedule
+          </Link>
+          .
+        </Notice>
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
         {policies.map((p) => {
           const current = p.versions.find((v) => toISO(v.effectiveFrom) <= today && (!v.effectiveTo || toISO(v.effectiveTo) >= today)) ?? p.versions[0];

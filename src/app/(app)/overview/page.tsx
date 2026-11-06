@@ -106,7 +106,9 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const todayMode =
     todayDay?.kind === "LEAVE" ? "LEAVE" : todayDay?.kind === "OFFSITE" ? "OFFSITE" : todayDay?.kind === "HOLIDAY" || todayDay?.kind === "WEEKEND" ? "OFF" : plannedToday ?? "UNPLANNED";
   const nextWfh = days.find((d) => d.date > today && d.plannable && modeOf(d) === "WFH");
-  const nextMandatory = days.find((d) => d.date > today && d.mandatory && d.plannable);
+  const officeMode = thisMonth.officeMode;
+  // With the WFO Policy off there are no mandatory days: the next office day comes from the office schedule.
+  const nextMandatory = days.find((d) => d.date > today && d.plannable && (officeMode ? modeOf(d) === "WFO" : d.mandatory));
   const ev = thisMonth.approvedEval ?? thisMonth.draftEval;
   const att = thisMonth.attendanceEval;
   const verified = att ? att.actualWfoVerified + att.offsiteCreditToDate : 0;
@@ -116,9 +118,9 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const deadlineDay = nextMonth.policy?.submissionDeadlineDay;
   const nextStatus = nextMonth.schedule?.status ?? "NOT_STARTED";
   const curStatus = thisMonth.schedule?.status ?? "NOT_STARTED";
-  if (["NOT_STARTED", "DRAFT", "CHANGES_REQUESTED", "REJECTED"].includes(curStatus) && thisMonth.requirement)
+  if (!officeMode && ["NOT_STARTED", "DRAFT", "CHANGES_REQUESTED", "REJECTED"].includes(curStatus) && thisMonth.requirement)
     actions.push({ key: "plan-cur", icon: ClipboardList, title: `Submit your ${formatMonth(cur.year, cur.month)} workplan`, detail: curStatus === "CHANGES_REQUESTED" ? "Your leader asked for changes" : "This month's plan isn't approved yet", href: `/calendar?month=${monthParam(cur.year, cur.month)}`, tone: "danger" });
-  if (["NOT_STARTED", "DRAFT", "CHANGES_REQUESTED", "REJECTED"].includes(nextStatus) && nextMonth.requirement)
+  if (!nextMonth.officeMode && ["NOT_STARTED", "DRAFT", "CHANGES_REQUESTED", "REJECTED"].includes(nextStatus) && nextMonth.requirement)
     actions.push({
       key: "plan-next",
       icon: ClipboardList,
@@ -192,7 +194,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         <Card className="lg:col-span-2">
           <CardHeader
             title="My work today"
-            description={thisMonth.policy ? `${thisMonth.policy.name}${thisMonth.policy.levelName ? ` · ${thisMonth.policy.levelName}` : ""}` : "No policy assigned"}
+            description={officeMode ? "Office schedule" : thisMonth.policy ? `${thisMonth.policy.name}${thisMonth.policy.levelName ? ` · ${thisMonth.policy.levelName}` : ""}` : "No policy assigned"}
             action={<Link href="/calendar" className="inline-flex items-center gap-1 text-[13px] font-medium text-brand-700 hover:underline">My Work Calendar <ArrowRight className="h-3.5 w-3.5" /></Link>}
           />
           <CardBody className="space-y-4">
@@ -209,9 +211,18 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
                 );
               })()}
               <MiniTile label="Next WFH" value={nextWfh ? `${formatWeekdayShort(nextWfh.date)}, ${short(nextWfh.date)}` : "None planned"} />
-              <MiniTile label="Next mandatory WFO" value={nextMandatory ? `${formatWeekdayShort(nextMandatory.date)}, ${short(nextMandatory.date)}` : "—"} />
+              <MiniTile label={officeMode ? "Next office day" : "Next mandatory WFO"} value={nextMandatory ? `${formatWeekdayShort(nextMandatory.date)}, ${short(nextMandatory.date)}` : "—"} />
             </div>
-            {thisMonth.requirement && ev ? (
+            {officeMode ? (
+              <div className="rounded-2xl bg-canvas p-4">
+                <div className="mb-2 text-[13px] font-medium text-ink">{formatMonth(cur.year, cur.month)} office schedule</div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12.5px] text-muted">
+                  <span>WFO days <b className="text-ink">{thisMonth.days.filter((d) => d.plannable && d.approved === "WFO").length}</b></span>
+                  <span>WFH days <b className="text-ink">{thisMonth.days.filter((d) => d.plannable && d.approved === "WFH").length}</b></span>
+                  <span>Verified check-ins <b className="text-ink">{verified}</b></span>
+                </div>
+              </div>
+            ) : thisMonth.requirement && ev ? (
               <div className="rounded-2xl bg-canvas p-4">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[13px]">
                   <span className="font-medium text-ink">{formatMonth(cur.year, cur.month)} WFO compliance</span>
@@ -348,14 +359,19 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
             <h2 className="font-display text-[19px] font-bold text-ink">{can(me, "company.view") ? "Company" : "My team"} · {formatMonth(cur.year, cur.month)}</h2>
             <Link href="/compliance" className="text-[13px] font-medium text-brand-700 hover:underline">Compliance dashboard →</Link>
           </div>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+          <div className={cn("grid grid-cols-2 gap-3", officeMode ? "md:grid-cols-3" : "md:grid-cols-4 xl:grid-cols-8")}>
             <Stat label="Active employees" value={company.totalActive} icon={Users2} />
-            <Stat label="Plans submitted" value={`${company.submitted}/${company.totalActive}`} icon={ClipboardList} />
+            {!officeMode && <Stat label="Plans submitted" value={`${company.submitted}/${company.totalActive}`} icon={ClipboardList} />}
             <Stat label="Pending approvals" value={company.pendingApprovals} icon={Clock} tone={company.pendingApprovals ? "warning" : "default"} />
-            <Stat label="Avg planned WFO" value={company.avgPlannedPercent !== null ? `${company.avgPlannedPercent}%` : "—"} icon={TrendingUp} tone="brand" />
-            <Stat label="Avg verified WFO" value={company.avgActualPercent !== null ? `${company.avgActualPercent}%` : "—"} icon={CheckCircle2} hint="to date" />
-            <Stat label="Below target / at risk" value={company.belowTarget} icon={ShieldAlert} tone={company.belowTarget ? "danger" : "success"} />
-            <Stat label="Replacement days owed" value={company.outstandingReplacement} icon={UserX} />
+            {/* WFO percentages only exist under the WFO Policy */}
+            {!officeMode && (
+              <>
+                <Stat label="Avg planned WFO" value={company.avgPlannedPercent !== null ? `${company.avgPlannedPercent}%` : "—"} icon={TrendingUp} tone="brand" />
+                <Stat label="Avg verified WFO" value={company.avgActualPercent !== null ? `${company.avgActualPercent}%` : "—"} icon={CheckCircle2} hint="to date" />
+                <Stat label="Below target / at risk" value={company.belowTarget} icon={ShieldAlert} tone={company.belowTarget ? "danger" : "success"} />
+                <Stat label="Replacement days owed" value={company.outstandingReplacement} icon={UserX} />
+              </>
+            )}
             <Stat label="Upcoming leave (14d)" value={company.upcomingLeave.length} icon={PlaneTakeoff} />
           </div>
         </section>

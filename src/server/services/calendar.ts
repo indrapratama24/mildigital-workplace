@@ -3,9 +3,14 @@
 import type { AttendanceException, AttendanceRecord, MonthlySchedule, Request, RequestType, ScheduleDay, ScheduleRevision, ScheduleRevisionItem } from "@/generated/prisma/client";
 import { db, type DbOrTx } from "../db";
 import { eachDate, fromISO, isoWeekday, monthEnd, monthStart, toISO, type ISODate } from "@/lib/dates";
-import { computeRequirement, isHolidayEffective, type HolidayInput, type LeaveDay, type ModeMap, type MonthRequirement } from "@/lib/engine/working-days";
+import { computeRequirement, isHolidayEffective, type HolidayInput, type LeaveDay, type ModeMap, type MonthRequirement, type PolicyRules } from "@/lib/engine/working-days";
+import type { OfficeDayInfo } from "@/lib/engine/office";
 import { resolvePolicy, toRules, type ResolvedPolicy } from "./policy";
 import { getSettings, type AppSettings } from "./settings";
+import { officeDaysFor } from "./office";
+
+/** Office schedule mode has no WFO percentage or locked days: the requirement only describes the days. */
+const OFFICE_RULES: PolicyRules = { wfoPercent: 0, mandatoryWeekdays: [], roundingMode: "CEIL", excludeLeaveFromDenominator: true, offsiteCountsAsWfo: true };
 
 export type RequestWithType = Request & { requestType: RequestType };
 export type RevisionWithItems = ScheduleRevision & { items: ScheduleRevisionItem[] };
@@ -24,6 +29,10 @@ export interface MonthContext {
   pendingRevisions: RevisionWithItems[];
   exceptions: AttendanceException[];
   holidays: HolidayInput[];
+  /** WFO Policy off: days follow the office schedule set by the Super Admin (null under the WFO Policy). */
+  office: Record<ISODate, OfficeDayInfo> | null;
+  /** Employee notes on their own days. */
+  dayNotes: Record<ISODate, string>;
 }
 
 export async function getHolidays(tx: DbOrTx, from: ISODate, to: ISODate): Promise<HolidayInput[]> {
@@ -99,6 +108,8 @@ export async function loadMonthContexts(
     tx.scheduleRevision.findMany({ where: { employeeId: { in: employeeIds }, status: "PENDING", schedule: { year, month } }, include: { items: true } }),
     tx.attendanceException.findMany({ where: { employeeId: { in: employeeIds }, year, month } }),
   ]);
+  const officeMode = !settings.wfoPolicyEnabled;
+  const office = officeMode ? await officeDaysFor(tx, employeeIds, from, to, settings) : null;
   const out = new Map<string, MonthContext>();
   for (const employeeId of employeeIds) {
     const policy = await resolvePolicy(tx, employeeId, year, month);
@@ -108,26 +119,40 @@ export async function loadMonthContexts(
     const myExceptions = exceptions.filter((e) => e.employeeId === employeeId);
     const leaves = approved.flatMap((r) => requestToLeaveDays(r, from, to)).concat(hypothetical?.extraLeaves ?? []);
     const offsite = approved.flatMap((r) => requestOffsiteDates(r, from, to)).concat(hypothetical?.extraOffsite ?? []);
-    const requirement = policy
-      ? computeRequirement({
-          year,
-          month,
-          workingWeekdays: settings.workingWeekdays,
-          holidays,
-          cutiBersamaIsHoliday: settings.cutiBersamaIsHoliday,
-          policy: toRules(policy.version),
-          leaves,
-          offsiteDates: offsite,
-          mandatoryWaiverDates: myExceptions.filter((e) => e.kind === "MANDATORY_DAY_WAIVER" && e.date).map((e) => toISO(e.date!)),
-          wfoReductionDays: myExceptions.filter((e) => e.kind === "WFO_REDUCTION").reduce((s, e) => s + e.days, 0),
-        })
-      : null;
+    const requirement =
+      policy || officeMode
+        ? computeRequirement({
+            year,
+            month,
+            workingWeekdays: settings.workingWeekdays,
+            holidays,
+            cutiBersamaIsHoliday: settings.cutiBersamaIsHoliday,
+            policy: officeMode ? OFFICE_RULES : toRules(policy!.version),
+            leaves,
+            offsiteDates: offsite,
+            mandatoryWaiverDates: officeMode ? [] : myExceptions.filter((e) => e.kind === "MANDATORY_DAY_WAIVER" && e.date).map((e) => toISO(e.date!)),
+            wfoReductionDays: officeMode ? 0 : myExceptions.filter((e) => e.kind === "WFO_REDUCTION").reduce((s, e) => s + e.days, 0),
+          })
+        : null;
     const plannedModes: ModeMap = {};
     const approvedModes: ModeMap = {};
-    for (const d of schedule?.days ?? []) {
-      if (d.plannedMode) plannedModes[toISO(d.date)] = d.plannedMode;
-      if (d.approvedMode) approvedModes[toISO(d.date)] = d.approvedMode;
-    }
+    const dayNotes: Record<ISODate, string> = {};
+    const myOffice = office?.get(employeeId) ?? null;
+    if (myOffice) {
+      // Office schedule, except the employee's own approved changes and frozen past days.
+      const stored = new Map((schedule?.days ?? []).map((d) => [toISO(d.date), d]));
+      for (const d of requirement!.days) {
+        if (!d.plannable) continue;
+        const s = stored.get(d.date);
+        const mode = s && (s.personal || s.frozen) && s.approvedMode ? s.approvedMode : myOffice[d.date].mode;
+        plannedModes[d.date] = approvedModes[d.date] = mode;
+        if (s?.personal && s.note) dayNotes[d.date] = s.note;
+      }
+    } else
+      for (const d of schedule?.days ?? []) {
+        if (d.plannedMode) plannedModes[toISO(d.date)] = d.plannedMode;
+        if (d.approvedMode) approvedModes[toISO(d.date)] = d.approvedMode;
+      }
     out.set(employeeId, {
       employeeId,
       year,
@@ -142,6 +167,8 @@ export async function loadMonthContexts(
       pendingRevisions: revisions.filter((r) => r.employeeId === employeeId),
       exceptions: myExceptions,
       holidays,
+      office: myOffice,
+      dayNotes,
     });
   }
   return out;

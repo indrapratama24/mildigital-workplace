@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleDashed, Clock3, Lock, AlertCircle } from "lucide-react";
+import { CheckCircle2, CircleDashed, Clock3, Lock, AlertCircle, MessageSquareText, UserRound } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { DayEvents } from "./day-events";
 import type { PlannerData } from "@/server/services/schedules";
@@ -77,6 +77,9 @@ export function DayCell({
 
   const dark = approvedView && mode === "WFO" && day.kind === "WORKDAY";
   const events = day.events ?? [];
+  // Office schedule mode: the Super Admin's note on the date and the employee's own note.
+  const officeNote = day.plannable ? day.office?.note ?? null : null;
+  const notes = [officeNote, day.note ? `You: ${day.note}` : null].filter(Boolean).join(" · ");
   return (
     // The whole cell toggles the day (a full-size button underneath); event entries sit above it as separate buttons.
     <div
@@ -95,7 +98,7 @@ export function DayCell({
           type="button"
           onClick={onClick}
           aria-pressed={selected !== undefined ? selected : undefined}
-          aria-label={`${day.date}${mode ? `, ${mode}` : ""}${day.mandatory ? ", mandatory WFO" : ""}${events.length ? `, ${events.length} event(s)` : ""}${conflict ? ", schedule conflict" : ""}`}
+          aria-label={`${day.date}${mode ? `, ${mode}` : ""}${day.mandatory ? ", mandatory WFO" : ""}${notes ? `, note: ${notes}` : ""}${events.length ? `, ${events.length} event(s)` : ""}${conflict ? ", schedule conflict" : ""}`}
           className="absolute inset-0 z-0 cursor-pointer rounded-xl"
         />
       )}
@@ -104,6 +107,7 @@ export function DayCell({
           <span className={cn("font-display text-[15px] font-semibold tabular", dark ? "text-white" : day.kind === "WEEKEND" ? "text-subtle" : "text-ink")}>{num}</span>
           <span className="flex items-center gap-1">
             {day.mandatory && <Lock className={cn("h-3.5 w-3.5", dark ? "text-white/80" : "text-brand-700")} aria-label="Mandatory WFO day" />}
+            {day.personal && <UserRound className={cn("h-3.5 w-3.5", dark ? "text-white/80" : "text-brand-700")} aria-label="Changed by you" />}
             {day.waived && <span className="rounded bg-warning-soft px-1 text-[9px] font-semibold text-warning">WAIVED</span>}
           </span>
         </div>
@@ -145,6 +149,12 @@ export function DayCell({
           )}
         </div>
         {day.holidayName && !compact && <span className="mt-1 line-clamp-2 text-[10.5px] leading-tight text-muted">{day.holidayName}</span>}
+        {notes && !compact && (
+          <span title={notes} className={cn("mt-1 line-clamp-2 flex items-start gap-1 text-[10.5px] leading-tight", dark ? "text-white/85" : "text-ink-2")}>
+            <MessageSquareText className="mt-px h-3 w-3 shrink-0" />
+            {officeNote ?? day.note}
+          </span>
+        )}
       </div>
     </div>
   );

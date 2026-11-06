@@ -39,6 +39,7 @@ export async function getPlannerData(viewer: CurrentUser, employeeId: string, ye
   const today = todayJakarta();
   const req = ctx.requirement;
   const isSelf = viewer.employeeId === employeeId;
+  const officeMode = !!ctx.office;
   const status = ctx.schedule?.status;
   const pendingByDate = new Map<ISODate, { toMode: WorkMode; revisionId: string }>();
   for (const r of ctx.pendingRevisions) for (const i of r.items) pendingByDate.set(toISO(i.date), { toMode: i.toMode, revisionId: r.id });
@@ -67,6 +68,11 @@ export async function getPlannerData(viewer: CurrentUser, employeeId: string, ye
       attendance: rec ? { mode: rec.mode, verified: rec.verification === "VERIFIED", clockInAt: rec.clockInAt?.toISOString() ?? null } : null,
       isPast: d.date < today,
       isToday: d.date === today,
+      /** Office schedule for the day (WFO Policy off). */
+      office: ctx.office?.[d.date] ?? null,
+      /** The employee changed this day themselves (it differs from, or adds a note to, the office schedule). */
+      personal: officeMode && d.plannable && !!ctx.schedule?.days.find((s) => toISO(s.date) === d.date)?.personal,
+      note: ctx.dayNotes[d.date] ?? null,
       events: [] as PlannerEvent[],
     };
   });
@@ -107,6 +113,9 @@ export async function getPlannerData(viewer: CurrentUser, employeeId: string, ye
     month,
     today,
     isSelf,
+    officeMode,
+    /** Weekdays that are usually WFO in the office schedule this month. */
+    officeWeekdays: officeMode ? [...new Set(days.filter((d) => d.office?.source === "PATTERN" && d.office.mode === "WFO").map((d) => d.weekday))].sort() : [],
     eventConflicts,
     eventExceptions: exceptions.map((x) => ({ eventId: x.eventId, date: toISO(x.date), status: x.status })),
     policy: ctx.policy
@@ -155,8 +164,8 @@ export async function getPlannerData(viewer: CurrentUser, employeeId: string, ye
     draftEval: req ? evaluatePlan(req, ctx.plannedModes) : null,
     approvedEval: req && Object.keys(ctx.approvedModes).length ? evaluatePlan(req, ctx.approvedModes) : null,
     attendanceEval: req && Object.keys(ctx.approvedModes).length ? evaluateAttendance(req, ctx.approvedModes, attendanceInputs(ctx), today) : null,
-    canEdit: isSelf && !!req && isEditable(status) && !isPastMonth(year, month),
-    canRevise: isSelf && !!req && (status === "APPROVED" || status === "REVISION_PENDING") && monthEnd(year, month) >= today,
+    canEdit: !officeMode && isSelf && !!req && isEditable(status) && !isPastMonth(year, month),
+    canRevise: isSelf && !!req && (officeMode || status === "APPROVED" || status === "REVISION_PENDING") && monthEnd(year, month) >= today,
     pendingRevisions: ctx.pendingRevisions.map((r) => ({ id: r.id, kind: r.kind, reason: r.reason, dates: r.items.map((i) => toISO(i.date)) })),
     history,
   };
@@ -218,6 +227,7 @@ function assertSelf(actor: CurrentUser, employeeId: string) {
 }
 
 function guardEditable(ctx: MonthContext) {
+  if (ctx.office) throw badState("Your calendar follows the office schedule. Select dates and request a change instead.");
   if (!ctx.requirement || !ctx.policy) throw badState("No WFO policy is assigned to you for this month. Contact HR.");
   const status = ctx.schedule?.status;
   if (status === "APPROVED" || status === "REVISION_PENDING")
@@ -331,7 +341,7 @@ export function defaultModes(ctx: MonthContext, planned: Record<ISODate, WorkMod
  */
 export async function prefillDefaultPlan(tx: Tx, employeeId: string, year: number, month: number) {
   const ctx = await loadMonthContext(employeeId, year, month, tx);
-  if (!ctx.requirement || !ctx.policy || !isEditable(ctx.schedule?.status) || isPastMonth(year, month)) return false;
+  if (ctx.office || !ctx.requirement || !ctx.policy || !isEditable(ctx.schedule?.status) || isPastMonth(year, month)) return false;
   const modes = defaultModes(ctx);
   if (!Object.keys(modes).length) return false;
   const schedule = await ensureSchedule(tx, ctx);
@@ -349,7 +359,7 @@ export async function autoApproveMetPlan(employeeId: string, year: number, month
   return withTx(async (tx) => {
     await prefillDefaultPlan(tx, employeeId, year, month);
     const ctx = await loadMonthContext(employeeId, year, month, tx);
-    if (!ctx.requirement || !ctx.policy || !ctx.schedule || ctx.schedule.status !== "DRAFT") return "skipped" as const;
+    if (ctx.office || !ctx.requirement || !ctx.policy || !ctx.schedule || ctx.schedule.status !== "DRAFT") return "skipped" as const;
     const ev = evaluatePlan(ctx.requirement, ctx.plannedModes);
     if (!ev.complete || ev.missingMandatoryDates.length || ev.shortfall > 0) return "short" as const;
     const conflicts = (await findConflicts(tx, employeeId, monthStart(year, month), monthEnd(year, month), ctx.plannedModes)).filter((c) => !c.exception);

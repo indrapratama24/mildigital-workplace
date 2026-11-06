@@ -114,12 +114,23 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
       <h2 className="mb-3 mt-8 font-display text-[19px] font-bold text-ink">Employment & work arrangement</h2>
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader title="WFO requirement" description="Calculated from the policy applicable each month." />
+          <CardHeader
+            title={months[0]?.office ? "Office days" : "WFO requirement"}
+            description={months[0]?.office ? "From the office schedule, including approved changes." : "Calculated from the policy applicable each month."}
+          />
           <CardBody className="grid gap-3 sm:grid-cols-2">
             {months.map((m) => (
               <div key={m.month} className="rounded-xl bg-canvas p-3 text-[13px]">
                 <div className="font-medium text-ink">{formatMonth(m.year, m.month)}</div>
-                {m.requirement && m.policy ? (
+                {m.office ? (
+                  <>
+                    <div className="mt-1 font-display text-[22px] font-bold text-brand-700">
+                      {Object.values(m.approvedModes).filter((x) => x === "WFO").length} WFO{" "}
+                      <span className="text-[14px] font-medium text-muted">/ {Object.values(m.approvedModes).filter((x) => x === "WFH").length} WFH</span>
+                    </div>
+                    <div className="text-muted">Office schedule</div>
+                  </>
+                ) : m.requirement && m.policy ? (
                   <>
                     <div className="mt-1 font-display text-[22px] font-bold text-brand-700">{m.requirement.effectiveMinimumWfo} WFO <span className="text-[14px] font-medium text-muted">/ max {m.requirement.maxWfhDays} WFH</span></div>
                     <div className="text-muted">{m.policy.version.policy.name}</div>

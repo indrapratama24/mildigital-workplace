@@ -7,12 +7,13 @@ import { computeRevisionImpact, evaluatePlan, type ChangeInput, type ModeMap, ty
 import type { CurrentUser } from "../auth/session";
 import { badState, conflict, forbidden, invalid, notFound } from "../errors";
 import { audit } from "./audit";
-import { loadMonthContext, pendingRevisionDates } from "./calendar";
+import { loadMonthContext, pendingRevisionDates, type MonthContext } from "./calendar";
 import { notify } from "./notifications";
 import { resolveApprover, resolveHrApprover } from "./org";
 import { scheduleLink } from "./schedules";
 import { cancelWorkflow, startWorkflow, type Outcome, type StepSpec } from "./workflow";
 import { findConflicts } from "./events";
+import { ensureOfficeSchedule } from "./office";
 import { monthEnd, monthStart } from "@/lib/dates";
 
 export interface RevisionInput {
@@ -49,12 +50,13 @@ export function describeChanges(changes: { date: ISODate; toMode: string; isRepl
 
 export async function createRevision(actor: CurrentUser, input: RevisionInput, txIn?: Tx) {
   if (actor.employeeId !== input.employeeId) throw forbidden("You can only request changes to your own schedule.");
-  if (input.reason.trim().length < 10) throw invalid("Please explain the reason (at least 10 characters).");
   if (!input.changes.length) throw invalid("Select at least one date to change.");
   const run = async (tx: Tx) => {
     const existing = await tx.scheduleRevision.findUnique({ where: { employeeId_idempotencyKey: { employeeId: input.employeeId, idempotencyKey: input.idempotencyKey } } });
     if (existing) return existing; // idempotent re-submit
     const ctx = await loadMonthContext(input.employeeId, input.year, input.month, tx);
+    if (ctx.office) return createOfficeRevision(tx, actor, input, ctx);
+    if (input.reason.trim().length < 10) throw invalid("Please explain the reason (at least 10 characters).");
     if (!ctx.schedule || !ctx.requirement || !ctx.policy) throw badState("There is no approved schedule for this month yet — edit your draft instead.");
     if (!["APPROVED", "REVISION_PENDING"].includes(ctx.schedule.status)) throw badState("Only approved schedules can be revised. Edit your draft instead.");
     const impact = await withEventConflicts(
@@ -120,6 +122,103 @@ export async function createRevision(actor: CurrentUser, input: RevisionInput, t
   return txIn ? run(txIn) : withTx(run);
 }
 
+/**
+ * Office schedule mode (WFO Policy off): there is no WFO target. Extra office days (WFH → WFO) apply at once;
+ * WFO → WFH goes to the leader. The reason doubles as the note shown on the day.
+ */
+async function createOfficeRevision(tx: Tx, actor: CurrentUser, input: RevisionInput, ctx: MonthContext) {
+  const impact = await withEventConflicts(
+    computeRevisionImpact(ctx.requirement!, ctx.approvedModes, input.changes, todayJakarta(), pendingRevisionDates(ctx)),
+    input.employeeId,
+    input.year,
+    input.month,
+    ctx.approvedModes,
+    input.changes,
+    tx,
+  );
+  if (impact.invalid.length) throw invalid(`${formatDate(impact.invalid[0].date)}: ${impact.invalid[0].reason}`, { impact });
+  const reason = input.reason.trim();
+  const toWfo = input.changes.filter((c) => c.toMode === "WFO");
+  const toWfh = input.changes.filter((c) => c.toMode !== "WFO");
+  if (toWfh.length && reason.length < 10) throw invalid("Please explain why you want to work from home (at least 10 characters).");
+  if (impact.eventConflicts.length && !input.requestException)
+    throw invalid(
+      `Schedule Conflict: you are assigned to a mandatory in-office event (${impact.eventConflicts.map((c) => `${c.event.title}, ${formatDate(c.date)}`).join("; ")}). Tick “Request an authorised exception” to send it for approval.`,
+      { impact, needsException: true },
+    );
+  const schedule = await ensureOfficeSchedule(tx, input.employeeId, input.year, input.month);
+  const items = (changes: ChangeInput[]) =>
+    changes.map((c) => ({ date: fromISO(c.date), fromMode: (ctx.approvedModes[c.date] ?? null) as WorkModeT | null, toMode: c.toMode, isReplacement: false }));
+
+  let applied = null;
+  if (toWfo.length) {
+    applied = await tx.scheduleRevision.create({
+      data: {
+        scheduleId: schedule.id,
+        employeeId: input.employeeId,
+        kind: "WFH_TO_WFO",
+        reason: reason || "Extra office day",
+        status: "APPROVED",
+        decidedAt: new Date(),
+        impact: impact as unknown as Prisma.InputJsonValue,
+        idempotencyKey: toWfh.length ? `${input.idempotencyKey}:wfo` : input.idempotencyKey,
+        items: { create: items(toWfo) },
+      },
+    });
+    for (const c of toWfo)
+      await tx.scheduleDay.upsert({
+        where: { scheduleId_date: { scheduleId: schedule.id, date: fromISO(c.date) } },
+        create: { scheduleId: schedule.id, date: fromISO(c.date), plannedMode: "WFO", approvedMode: "WFO", personal: true, note: reason || null },
+        update: { plannedMode: "WFO", approvedMode: "WFO", personal: true, frozen: false, note: reason || null },
+      });
+    await snapshotRevision(tx, schedule.id, actor.employeeId, `Approved automatically (extra office day): ${describeChanges(toWfo)}${reason ? ` — ${reason}` : ""}`);
+    await audit(tx, { actorUserId: actor.userId, action: "revision.auto_approve", entityType: "ScheduleRevision", entityId: applied.id, after: { changes: toWfo, note: reason } });
+  }
+  if (!toWfh.length) return applied!;
+
+  const revision = await tx.scheduleRevision.create({
+    data: {
+      scheduleId: schedule.id,
+      employeeId: input.employeeId,
+      kind: "WFO_TO_WFH",
+      reason,
+      requiresException: impact.eventConflicts.length > 0,
+      impact: impact as unknown as Prisma.InputJsonValue,
+      idempotencyKey: input.idempotencyKey,
+      items: { create: items(toWfh) },
+    },
+  });
+  const leader = await resolveApprover(tx, input.employeeId);
+  await startWorkflow(tx, { subjectType: "REVISION", subjectId: revision.id, requesterId: input.employeeId, steps: [{ kind: "LEADER", assigneeId: leader.assigneeId }], actorEmployeeId: actor.employeeId, comment: reason });
+  await tx.monthlySchedule.update({ where: { id: schedule.id }, data: { status: "REVISION_PENDING" } });
+  await notify(tx, {
+    employeeId: leader.assigneeId,
+    type: "REVISION_SUBMITTED",
+    title: `${actor.fullName} asked to work from home`,
+    body: `${describeChanges(toWfh)}${impact.eventConflicts.length ? " · has a mandatory in-office event" : ""}. Reason: ${reason}`,
+    link: "/approvals",
+  });
+  await audit(tx, { actorUserId: actor.userId, action: "revision.create", entityType: "ScheduleRevision", entityId: revision.id, after: { ...input, impact } });
+  return revision;
+}
+
+async function snapshotRevision(tx: Tx, scheduleId: string, actorId: string | null, note: string) {
+  const days = await tx.scheduleDay.findMany({ where: { scheduleId } });
+  const last = await tx.scheduleVersion.findFirst({ where: { scheduleId }, orderBy: { version: "desc" } });
+  const version = (last?.version ?? 0) + 1;
+  await tx.scheduleVersion.create({
+    data: {
+      scheduleId,
+      version,
+      kind: "REVISION_APPLIED",
+      days: days.map((d) => ({ date: toISO(d.date), planned: d.plannedMode, approved: d.approvedMode })) as unknown as Prisma.InputJsonValue,
+      actorId,
+      note,
+    },
+  });
+  await tx.monthlySchedule.update({ where: { id: scheduleId }, data: { currentVersion: version } });
+}
+
 async function refreshScheduleStatus(tx: Tx, scheduleId: string) {
   const open = await tx.scheduleRevision.count({ where: { scheduleId, status: "PENDING" } });
   await tx.monthlySchedule.update({ where: { id: scheduleId }, data: { status: open ? "REVISION_PENDING" : "APPROVED" } });
@@ -147,10 +246,12 @@ export async function onRevisionWorkflow(tx: Tx, wf: ApprovalWorkflow, outcome: 
     const after: ModeMap = { ...ctx.approvedModes };
     for (const i of rev.items) {
       after[toISO(i.date)] = i.toMode;
+      // In office schedule mode the change is the employee's own and stays until the office schedule changes that date.
+      const personal = !!ctx.office;
       await tx.scheduleDay.upsert({
         where: { scheduleId_date: { scheduleId: schedule.id, date: i.date } },
-        create: { scheduleId: schedule.id, date: i.date, plannedMode: i.toMode, approvedMode: i.toMode },
-        update: { plannedMode: i.toMode, approvedMode: i.toMode },
+        create: { scheduleId: schedule.id, date: i.date, plannedMode: i.toMode, approvedMode: i.toMode, personal },
+        update: { plannedMode: i.toMode, approvedMode: i.toMode, personal, ...(personal ? { frozen: false, note: null } : {}) },
       });
     }
     // Authorised exceptions are recorded explicitly — the employee is never silently marked compliant.

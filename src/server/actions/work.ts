@@ -66,15 +66,20 @@ export async function previewRevisionAction(input: unknown) {
 }
 
 export async function createRevisionAction(input: unknown) {
-  return runAction(async () => {
+  const r = await runAction(async () => {
     const me = await requireUser();
     const p = month
       .extend({ changes, kind: z.enum(["WFO_TO_WFH", "WFH_TO_WFO", "SWAP", "ADDITIONAL_WFH"]), reason: z.string().max(1000), requestException: z.boolean().optional(), idempotencyKey: z.string().uuid() })
       .parse(input);
-    const r = await createRevision(me, p);
+    const rev = await createRevision(me, p);
     refresh();
-    return { id: r.id };
-  }, "Change request sent to your leader");
+    return { id: rev.id, status: rev.status, extraOfficeDays: p.changes.filter((c) => c.toMode === "WFO").length };
+  });
+  if (!r.ok || !r.data) return r;
+  // Office schedule mode applies extra office days at once; anything else waits for the leader.
+  const message =
+    r.data.status === "APPROVED" ? "Saved — extra office days don't need approval." : r.data.extraOfficeDays ? "Office days saved; the WFH request was sent to your leader." : "Change request sent to your leader";
+  return { ...r, message };
 }
 
 export async function cancelRevisionAction(id: string) {

@@ -17,6 +17,7 @@ export const SETTINGS_GROUPS: { label: string; items: SettingsNavItem[] }[] = [
   {
     label: "Work Arrangement",
     items: [
+      { href: "/settings/office", label: "WFO Policy & office schedule", perm: "policy.manage" },
       { href: "/settings/policies", label: "WFO policies & levels", perm: "policy.manage" },
       { href: "/settings/holidays", label: "Holidays", perm: "holiday.manage" },
       { href: "/settings/requests", label: "Request types", perm: "requestType.manage" },

@@ -341,7 +341,8 @@ export async function computeRequestImpact(actor: CurrentUser, input: Omit<Reque
       loadMonthContext(actor.employeeId, year, month, db, { excludeRequestId: input.id }),
       loadMonthContext(actor.employeeId, year, month, db, { excludeRequestId: input.id, extraLeaves, extraOffsite }),
     ]);
-    if (!before.requirement || !after.requirement) continue;
+    // No WFO target while the WFO Policy is off, so leave never needs replacement office days.
+    if (!before.requirement || !after.requirement || before.office) continue;
     const modes = Object.keys(before.approvedModes).length ? before.approvedModes : before.plannedModes;
     const hasPlan = Object.keys(modes).length > 0;
     const pb = evaluatePlan(before.requirement, modes);

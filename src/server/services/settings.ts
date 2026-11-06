@@ -4,6 +4,10 @@ import { audit } from "./audit";
 import type { PortfolioVisibility } from "@/lib/portfolio-visibility";
 
 export interface AppSettings {
+  /** WFO Policy feature: employees plan their month against a WFO % (true), or follow the office schedule set by the Super Admin (false). */
+  wfoPolicyEnabled: boolean;
+  /** Office schedule (WFO Policy off): company-wide weekly WFO days (ISO weekdays); teams may have their own. */
+  officeWfoWeekdays: number[];
   workingWeekdays: number[];
   cutiBersamaIsHoliday: boolean;
   clockInValidatesDay: boolean;
@@ -39,6 +43,8 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  wfoPolicyEnabled: true,
+  officeWfoWeekdays: [],
   workingWeekdays: [1, 2, 3, 4, 5],
   cutiBersamaIsHoliday: true,
   clockInValidatesDay: false,

@@ -29,6 +29,7 @@ export type NotificationType =
   | "EVENT_CONFLICT"
   | "EVENT_REMINDER"
   | "REGULATION_PUBLISHED"
+  | "OFFICE_SCHEDULE_CHANGED"
   | "RECOGNITION";
 
 export interface NotifyInput {

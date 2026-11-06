@@ -6,6 +6,7 @@ import { can } from "@/server/authz";
 import { complianceRows, complianceTrend } from "@/server/services/compliance";
 import { correctionHistory, recordsToVerify } from "@/server/services/attendance";
 import { visibleEmployeeIds } from "@/server/services/org";
+import { getSettings } from "@/server/services/settings";
 import { addMonths, currentMonthJakarta, formatDate, formatDateTime, formatMonth, monthParam, parseMonthParam, toISO } from "@/lib/dates";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EmptyState, PageHeader, Stat, Table } from "@/components/ui/misc";
@@ -26,6 +27,8 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
   const isManager = can(me, "team.view");
   const filters = { teamId: sp.team || undefined, levelId: sp.level || undefined, leaderId: sp.leader || undefined, status: sp.status || undefined, q: sp.q || undefined };
   const [mine] = await complianceRows({ ...me, role: "EMPLOYEE" }, year, month);
+  // WFO Policy off: no WFO minimum or percentage, only attendance against the office schedule.
+  const officeMode = !(await getSettings()).wfoPolicyEnabled;
   const [trend, rows, teams, levels, leaders, toVerify, corrections, employees] = await Promise.all([
     complianceTrend(me.employeeId, year, month),
     isManager ? complianceRows(me, year, month, filters) : Promise.resolve([]),
@@ -55,7 +58,11 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
       <PageHeader
         eyebrow="Attendance & Compliance"
         title={formatMonth(year, month)}
-        description="Planning, attendance, mandatory-day and approval compliance are measured separately. Only verified check-ins count as actual attendance."
+        description={
+          officeMode
+            ? "Attendance against the office schedule. Only verified check-ins count as actual attendance."
+            : "Planning, attendance, mandatory-day and approval compliance are measured separately. Only verified check-ins count as actual attendance."
+        }
         actions={
           <div className="flex items-center rounded-full border border-line bg-white p-1">
             <Link href={qs(prev)} className="rounded-full p-1.5 text-muted hover:bg-brand-50" aria-label="Previous month">
@@ -69,11 +76,19 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
         }
       />
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+      <div className={officeMode ? "grid gap-5" : "grid gap-5 lg:grid-cols-[1fr_1fr]"}>
         <Card>
-          <CardHeader title="My compliance" action={mine && <StatusBadge status={mine.attendanceStatus} />} />
+          <CardHeader title={officeMode ? "My attendance" : "My compliance"} action={mine && !officeMode && <StatusBadge status={mine.attendanceStatus} />} />
           <CardBody>
-            {mine ? (
+            {mine && officeMode ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <Mini label="WFO days" value={mine.plannedWfo ?? "—"} />
+                <Mini label="Verified WFO" value={mine.actualWfo} />
+                <Mini label="Unverified" value={mine.unverifiedWfo} />
+                <Mini label="Missing check-ins" value={mine.unauthorizedAbsences} />
+                <Mini label="Leave days" value={mine.leaveDays} />
+              </div>
+            ) : mine ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <Mini label="Planning" value={yes(mine.planningCompliant)} />
                 <Mini label="Mandatory days" value={yes(mine.mandatoryCompliant)} />
@@ -89,26 +104,36 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
             )}
           </CardBody>
         </Card>
-        <Card>
-          <CardHeader title="My trend" description="Last 6 months" />
-          <CardBody>
-            {trend.some((t) => t.actual !== null) ? <TrendChart data={trend} /> : <p className="py-10 text-center text-[13px] text-muted">No approved plans in the last 6 months yet.</p>}
-          </CardBody>
-        </Card>
+        {!officeMode && (
+          <Card>
+            <CardHeader title="My trend" description="Last 6 months" />
+            <CardBody>
+              {trend.some((t) => t.actual !== null) ? <TrendChart data={trend} /> : <p className="py-10 text-center text-[13px] text-muted">No approved plans in the last 6 months yet.</p>}
+            </CardBody>
+          </Card>
+        )}
       </div>
 
       {isManager && (
         <section className="mt-8 space-y-5">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Stat label="On track / compliant" value={counts.onTrack} tone="success" />
-            <Stat label="At risk / unverified" value={counts.risk} tone="warning" />
-            <Stat label="Shortfall / non-compliant" value={counts.short} tone="danger" />
-            <Stat label="No approved plan" value={counts.noPlan} />
-          </div>
+          {officeMode ? (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              <Stat label="Verified WFO days" value={rows.reduce((n, r) => n + r.actualWfo, 0)} tone="success" />
+              <Stat label="Unverified check-ins" value={rows.reduce((n, r) => n + r.unverifiedWfo, 0)} tone="warning" />
+              <Stat label="Missing check-ins" value={rows.reduce((n, r) => n + r.unauthorizedAbsences, 0)} tone="danger" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Stat label="On track / compliant" value={counts.onTrack} tone="success" />
+              <Stat label="At risk / unverified" value={counts.risk} tone="warning" />
+              <Stat label="Shortfall / non-compliant" value={counts.short} tone="danger" />
+              <Stat label="No approved plan" value={counts.noPlan} />
+            </div>
+          )}
           <Card>
             <CardHeader
-              title={can(me, "company.view") ? "Company & team compliance" : "Team compliance"}
-              description="Current month shows On track / At risk / Projected shortfall — final status is set after the month ends."
+              title={officeMode ? (can(me, "company.view") ? "Company & team attendance" : "Team attendance") : can(me, "company.view") ? "Company & team compliance" : "Team compliance"}
+              description={officeMode ? "WFO days come from the office schedule with each person's approved changes." : "Current month shows On track / At risk / Projected shortfall — final status is set after the month ends."}
               action={
                 <a href={`/api/export/compliance?${exportQs}`} className={buttonClass("secondary", "sm")}>
                   <Download className="h-4 w-4" /> Export CSV
@@ -136,18 +161,55 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
                   <option key={l.id} value={l.id}>{l.fullName}</option>
                 ))}
               </Select>
-              <Select name="status" defaultValue={sp.status ?? ""} className="h-9 w-auto">
+              {!officeMode && <Select name="status" defaultValue={sp.status ?? ""} className="h-9 w-auto">
                 <option value="">All statuses</option>
                 {["ON_TRACK", "AT_RISK", "PROJECTED_SHORTFALL", "COMPLIANT", "NON_COMPLIANT", "PENDING_VERIFICATION", "NO_PLAN", "PENDING_LEADER_APPROVAL", "DRAFT"].map((s) => (
                   <option key={s} value={s}>{s.replace(/_/g, " ").toLowerCase()}</option>
                 ))}
-              </Select>
+              </Select>}
               <button className={buttonClass("primary", "sm", "h-9")}>Apply</button>
               <Link href={`/compliance?month=${monthParam(year, month)}`} className={buttonClass("ghost", "sm", "h-9")}>Reset</Link>
             </form>
             <div className="px-2 pb-3 pt-3">
               {rows.length === 0 ? (
                 <EmptyState icon={ShieldCheck} title="No employees match these filters" className="m-3" />
+              ) : officeMode ? (
+                <Table className="min-w-[900px] [&_td]:whitespace-nowrap">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Team / level</th>
+                      <th className="text-right">WFO days</th>
+                      <th className="text-right">WFH</th>
+                      <th className="text-right">Verified</th>
+                      <th className="text-right">Leave</th>
+                      <th className="text-right">Missing check-ins</th>
+                      <th>Follows schedule</th>
+                      <th className="text-right">Pending</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.employeeId} className="hover:bg-canvas/50">
+                        <td>
+                          <Link href={`/calendar?month=${monthParam(year, month)}&employee=${r.employeeId}`} className="font-medium text-ink hover:text-brand-700">{r.fullName}</Link>
+                          <div className="text-[11.5px] text-muted">{r.leaderName ? `Leader: ${r.leaderName}` : r.jobTitle}</div>
+                        </td>
+                        <td>
+                          <div>{r.teamName ?? "—"}</div>
+                          <div className="text-[11.5px] text-muted">{r.levelName ?? "—"}</div>
+                        </td>
+                        <td className="text-right tabular">{r.plannedWfo ?? "—"}</td>
+                        <td className="text-right tabular">{r.approvedWfh ?? "—"}</td>
+                        <td className="text-right tabular">{r.actualWfo}{r.unverifiedWfo ? <span className="text-warning"> +{r.unverifiedWfo}</span> : null}</td>
+                        <td className="text-right tabular">{r.leaveDays}</td>
+                        <td className={r.unauthorizedAbsences ? "text-right font-medium text-danger tabular" : "text-right tabular"}>{r.unauthorizedAbsences}</td>
+                        <td>{yes(r.approvalCompliant)}</td>
+                        <td className="text-right tabular">{r.pendingRequests || ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
               ) : (
                 <Table className="min-w-[1240px] [&_td]:whitespace-nowrap">
                   <thead>
